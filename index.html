@@ -35,8 +35,8 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
         /* Hata Ayıklama Paneli */
-        #debugPanel { position: fixed; top: 80px; left: 16px; z-index: 150; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; border: 1px solid #333; pointer-events: none; color: white; font-family: monospace; font-size: 12px; }
-        #audioMeterContainer { width: 150px; height: 10px; background: #222; border-radius: 5px; overflow: hidden; margin-top: 5px; }
+        #debugPanel { position: fixed; top: 80px; left: 16px; z-index: 150; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; border: 1px solid #333; pointer-events: none; color: white; font-family: monospace; font-size: 12px; min-width: 180px; }
+        #audioMeterContainer { width: 100%; height: 10px; background: #222; border-radius: 5px; overflow: hidden; margin-top: 5px; margin-bottom: 5px; }
         #audioMeterFill { height: 100%; width: 0%; background: #00ff00; transition: width 0.1s; }
         #micStatus { font-weight: bold; margin-top: 5px; }
     </style>
@@ -47,7 +47,10 @@
     <div id="debugPanel" class="hidden">
         <div>Ses Şiddeti: <span id="volumeText">0</span></div>
         <div id="audioMeterContainer"><div id="audioMeterFill"></div></div>
+        <div>Ctx: <span id="ctxStateText" class="text-yellow-400">Bekliyor</span></div>
         <div id="micStatus" class="text-red-400">Motor: BEKLİYOR</div>
+        <div class="mt-2 text-gray-400 border-t border-gray-600 pt-1">Duyulan:</div>
+        <div id="lastHeardText" class="text-white italic break-words w-full min-h-[20px]">-</div>
     </div>
 
     <!-- Kontrol Menüsü -->
@@ -75,7 +78,7 @@
         <div id="errorBox" class="hidden text-red-400 mt-4 text-center font-semibold bg-red-900/30 p-4 rounded-xl border border-red-500/50 max-w-md mx-4"></div>
     </div>
 
-    <canvas id="eyeCanvas"></canvas>
+    <canvas id="eyeCanvas" class="interactive"></canvas>
     <video id="webcam" autoplay playsinline muted class="hidden fixed bottom-6 left-6 w-48 md:w-64 rounded-2xl border-2 border-cyan-500 shadow-[0_0_20px_rgba(0,255,255,0.4)] z-50 object-cover" style="transform: scaleX(-1);"></video>
 
     <!-- Resim Gösterme Alanı -->
@@ -102,10 +105,10 @@
     </div>
 
     <!-- Etkileşim UI Katmanı -->
-    <div id="uiLayer" class="absolute bottom-6 right-6 z-20 hidden w-full pr-12">
+    <div id="uiLayer" class="absolute bottom-6 right-6 z-20 hidden w-full pr-12 pointer-events-none">
         <div id="subtitle"></div>
 
-        <div id="magicMenu" class="flex flex-row-reverse gap-4 mb-4 items-center absolute bottom-16 right-0 origin-bottom-right">
+        <div id="magicMenu" class="flex flex-row-reverse gap-4 mb-4 items-center absolute bottom-16 right-0 origin-bottom-right pointer-events-none interactive">
             <button onclick="triggerGemini('Okul öncesi çocukların kaba motor becerilerini geliştirecek, evde oynanabilen, hareketli ve hayal gücünü çalıştıran 1 dakikalık kısa bir oyun öner (Örn: hayvan taklidi, zıplama oyunu). MEB Maarif Modeli değerlerine uygun, neşeli ve coşkulu bir dille anlat.', false)" class="group flex flex-col items-center">
                 <div class="w-16 h-16 md:w-22 md:h-22 rounded-full bg-purple-500/90 flex items-center justify-center text-4xl md:text-5xl shadow-[0_0_20px_rgba(168,85,247,0.6)] border-4 border-purple-200 transform group-hover:scale-110 transition-all cursor-pointer">⚽</div>
             </button>
@@ -154,7 +157,7 @@
         // API anahtarı çalışma ortamı tarafından otomatik enjekte edilir
         const apiKey = "";
         let ttsAudioContext = null;
-        let audioContext = null; // ANDROID İÇİN GLOBAL TANIM
+        let audioContext = null; 
 
         let faceModel = null;
         let targetX = window.innerWidth / 2;
@@ -167,7 +170,7 @@
         
         let globalMicrophoneStream = null;
 
-        // API Üstel Geri Çekilme (Bağlantı kopukluklarına karşı)
+        // API Üstel Geri Çekilme
         async function fetchWithRetry(url, options, maxRetries = 5) {
             const delays = [1000, 2000, 4000, 8000, 16000];
             for (let i = 0; i < maxRetries; i++) {
@@ -182,13 +185,13 @@
             }
         }
 
-        // --- 1. ÇÖZÜM: EKRAN UYANIK TUTMA (WAKE LOCK) ---
+        // --- EKRAN UYANIK TUTMA (WAKE LOCK) ---
         async function requestWakeLock() {
             if ('wakeLock' in navigator) {
                 try {
                     wakeLock = await navigator.wakeLock.request('screen');
                     wakeLock.addEventListener('release', () => {
-                        if (isSystemRunning) requestWakeLock(); // Bırakılırsa hemen tekrar iste
+                        if (isSystemRunning) requestWakeLock();
                     });
                 } catch (err) { }
             }
@@ -198,6 +201,42 @@
             if (wakeLock !== null && document.visibilityState === 'visible' && isSystemRunning) {
                 requestWakeLock();
             }
+        });
+
+        // --- GLOBAL ETKİLEŞİM KİLİDİ VE MANUEL UYANDIRMA ---
+        let isAudioUnlocked = false;
+        const handleUserTouch = () => {
+            // 1. AudioContext Kilit Kırıcı
+            if (!isAudioUnlocked) {
+                try {
+                    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    if (audioContext.state !== 'running') audioContext.resume();
+                    
+                    const osc = audioContext.createOscillator();
+                    const gain = audioContext.createGain();
+                    gain.gain.value = 0;
+                    osc.connect(gain);
+                    gain.connect(audioContext.destination);
+                    osc.start(0);
+                    osc.stop(audioContext.currentTime + 0.1);
+                    isAudioUnlocked = true;
+                } catch(e) {}
+            }
+
+            // 2. YENİ: Ekrana dokunulduğunda asistanı ZORLA UYANDIR!
+            if (isSystemRunning && !isAwake && !isTalking && !isThinking) {
+                isAwake = true;
+                waitingForCommand = true;
+                currentEmotion = 'MUTLU';
+                playWakeSound();
+                resetSleepTimer();
+                sendSyncMessage({ type: 'AWAKE_STATE', payload: { state: true, emotion: 'MUTLU' } });
+                sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: true } });
+            }
+        };
+
+        ['click', 'touchstart'].forEach(evt => {
+            window.addEventListener(evt, handleUserTouch, { capture: true, passive: true });
         });
 
         // --- TAM EKRAN VE AYNA MODU ---
@@ -214,7 +253,6 @@
         });
 
         const mirrors = new Set();
-
         window.addEventListener('message', (event) => {
             if (!event.data || !event.data.type) return;
             const { type, payload } = event.data;
@@ -365,16 +403,15 @@
             osc.start(); osc.stop(ttsAudioContext.currentTime + 0.3);
         }
 
-        // --- KESİNTİSİZ SES TANIMA (VAD HACK & DEBUG) ---
+        // --- KESİNTİSİZ SES TANIMA SİSTEMİ ---
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
         let sleepTimer;
         let analyser = null;
         let dataArray = null;
-        let isDetectingVoice = false;
-        let isSpeechRecognitionActive = false; // Gerçekte motor açık mı?
-        let isRecognitionStarting = false;     // InvalidStateError için KİLİT MEKANİZMASI
-        let vadThreshold = 10; 
+        let isSpeechRecognitionActive = false; 
+        let isRecognitionStarting = false;     
+        let isRecognitionManuallyStopped = false;
 
         function updateDebugPanel(volume, statusText, statusColor) {
             const volEl = document.getElementById('volumeText');
@@ -387,6 +424,12 @@
             if (statusEl) {
                 statusEl.innerText = "Motor: " + statusText;
                 statusEl.className = statusColor;
+            }
+
+            const ctxEl = document.getElementById('ctxStateText');
+            if (ctxEl && audioContext) {
+                ctxEl.innerText = audioContext.state;
+                ctxEl.className = audioContext.state === 'running' ? "text-green-400 font-bold" : "text-yellow-400";
             }
         }
 
@@ -407,25 +450,16 @@
             }
             
             try {
-                // AudioContext'in tamamen aktif olmasını bekle
-                if (!audioContext) {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                }
-                
-                if (audioContext.state === 'suspended') {
-                    await audioContext.resume();
-                }
-                
-                console.log("AudioContext State (Başlangıç):", audioContext.state);
+                if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioContext.state === 'suspended') await audioContext.resume();
                 
                 const source = audioContext.createMediaStreamSource(globalMicrophoneStream);
                 analyser = audioContext.createAnalyser();
                 analyser.fftSize = 256;
                 analyser.smoothingTimeConstant = 0.8; 
                 
-                // Chrome Hack
                 const dummyGain = audioContext.createGain();
-                dummyGain.gain.value = 0;
+                dummyGain.gain.value = 0.001; 
                 
                 source.connect(analyser);
                 analyser.connect(dummyGain);
@@ -433,9 +467,7 @@
                 
                 const bufferLength = analyser.frequencyBinCount;
                 dataArray = new Uint8Array(bufferLength);
-                console.log("Ses Analizörü Başarıyla Bağlandı");
             } catch (err) {
-                console.error("Web Audio API Hatası:", err);
                 updateDebugPanel(0, "AUDIO API HATASI", "text-red-500 font-bold");
             }
             
@@ -451,17 +483,38 @@
                     updateDebugPanel(0, "AÇIK (DİNLİYOR)", "text-green-400 font-bold");
                 };
                 
+                // YENİ: Motor kapandığında HİÇ BEKLEMEDEN (50ms) kendini yeniden başlatır! (Ouroboros Döngüsü)
                 recognition.onend = () => {
                     isSpeechRecognitionActive = false;
                     isRecognitionStarting = false;
-                    updateDebugPanel(0, "KAPALI (BEKLİYOR)", "text-yellow-400");
+                    updateDebugPanel(0, "KAPALI (YENİDEN BAŞLATILIYOR)", "text-yellow-400");
+                    
+                    if (isSystemRunning && !isTalking && !isThinking && !isRecognitionManuallyStopped) {
+                        isRecognitionStarting = true;
+                        setTimeout(() => {
+                            try { recognition.start(); } catch(e) { isRecognitionStarting = false; }
+                        }, 50); 
+                    }
                 };
                 
                 recognition.onerror = (e) => {
                     isSpeechRecognitionActive = false;
                     isRecognitionStarting = false;
-                    console.error("SpeechRecognition Hatası:", e.error);
                     updateDebugPanel(0, "HATA: " + e.error, "text-red-400 font-bold");
+                    
+                    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+                        isRecognitionManuallyStopped = true;
+                        showRuntimeError("Mikrofon izni reddedildi.");
+                        return;
+                    }
+
+                    // Hata durumunda bile kendini hemen toparla
+                    if (isSystemRunning && !isTalking && !isThinking && !isRecognitionManuallyStopped) {
+                        isRecognitionStarting = true;
+                        setTimeout(() => {
+                            try { recognition.start(); } catch(err) { isRecognitionStarting = false; }
+                        }, 50);
+                    }
                 };
                 
                 recognition.onresult = async (event) => {
@@ -472,11 +525,19 @@
                         transcript += event.results[i][0].transcript;
                     }
                     transcript = transcript.toLowerCase().trim();
-                    console.log("Algılanan Metin:", transcript);
+                    
+                    // YENİ: Duyulan metni canlı olarak ekranda göster (Hata ayıklama için çok önemli)
+                    const heardEl = document.getElementById('lastHeardText');
+                    if (heardEl) {
+                        heardEl.innerText = transcript;
+                        heardEl.classList.add('text-cyan-300');
+                        setTimeout(() => heardEl.classList.remove('text-cyan-300'), 1000);
+                    }
 
                     if (!transcript) return;
 
-                    const wakeWordRegex = /arkada[şs](ım)?/i;
+                    // Esnetilmiş Wake Word (Arkadaş veya Arkadaşım)
+                    const wakeWordRegex = /arkada[şs]/i; 
                     const hasWakeWord = wakeWordRegex.test(transcript);
                    
                     if (hasWakeWord) {
@@ -486,7 +547,8 @@
                         const parts = transcript.split(wakeWordRegex);
                         const command = parts[parts.length - 1].trim();
 
-                        if (command.length > 5) {
+                        // Eğer sadece "Arkadaş" dendiyse uyan, arkasında cümle varsa komutu işlet
+                        if (command.length > 2 && !command.startsWith("ım")) {
                             waitingForCommand = false;
                             sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: false } });
                             triggerGemini(command, true);
@@ -494,7 +556,6 @@
                             waitingForCommand = true;
                             currentEmotion = 'MUTLU';
                             playWakeSound();
-                           
                             sendSyncMessage({ type: 'AWAKE_STATE', payload: { state: true, emotion: 'MUTLU' } });
                             sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: true } });
                         }
@@ -513,15 +574,20 @@
                 showRuntimeError("Tarayıcınız SpeechRecognition özelliğini desteklemiyor.");
             }
             
+            // İlk başlatma
+            if (!isSpeechRecognitionActive && !isRecognitionStarting) {
+                isRecognitionStarting = true;
+                setTimeout(() => { try { recognition.start(); } catch(e) { isRecognitionStarting = false; } }, 100);
+            }
+
             detectVoiceActivity();
         }
         
         function detectVoiceActivity() {
             if (!isSystemRunning || isMirrorMode) return;
             
-            // Eğer Context uyutulduysa zorla uyandır (Android 13 koruması)
-            if (audioContext && audioContext.state === 'suspended') {
-                audioContext.resume().catch(e => console.warn("AudioContext uyandırılamadı:", e));
+            if (audioContext && audioContext.state !== 'running') {
+                audioContext.resume();
             }
 
             if (analyser && dataArray) {
@@ -533,26 +599,22 @@
                 }
                 const averageVolume = sum / dataArray.length;
                 
-                if (!isSpeechRecognitionActive) {
+                // VAD artık motoru başlatmak için DEĞİL, sadece görsel panel güncellemesi için kullanılıyor.
+                // Motor, onend eventi sayesinde kendi kendini başlatıyor.
+                if (!isSpeechRecognitionActive && isRecognitionStarting) {
+                   updateDebugPanel(averageVolume, "BAŞLATILIYOR...", "text-blue-400");
+                } else if (!isSpeechRecognitionActive) {
                    updateDebugPanel(averageVolume, "BEKLİYOR", "text-yellow-400");
                 } else {
                    updateDebugPanel(averageVolume, "AÇIK", "text-green-400");
                 }
                 
-                // ORTAMDA SES VARSA VE MOTOR ÇALIŞMIYOR/BAŞLAMIYOR İSE BAŞLAT
-                if (!isTalking && !isThinking && averageVolume > vadThreshold) {
-                    if (recognition && !isSpeechRecognitionActive && !isRecognitionStarting) {
-                        isRecognitionStarting = true;
-                        try {
-                            recognition.start();
-                        } catch(e) {
-                            isRecognitionStarting = false;
-                        }
-                    }
+                // EMNİYET SÜBABI (Watchdog): Eğer sistem bir nedenden ötürü donarsa ve motor kapanırsa zorla uyandır
+                if (!isTalking && !isThinking && !isSpeechRecognitionActive && !isRecognitionStarting && !isRecognitionManuallyStopped) {
+                    isRecognitionStarting = true;
+                    try { recognition.start(); } catch(e) { isRecognitionStarting = false; }
                 }
-            } else {
-                updateDebugPanel(0, "ANALİZÖR HATA", "text-red-500 font-bold");
-            }
+            } 
             
             requestAnimationFrame(detectVoiceActivity);
         }
@@ -1057,17 +1119,7 @@
         window.onload = function () {
             // ANDROID İÇİN KRİTİK GÜNCELLEME: AudioContext tam olarak TIKLAMA ANINDA oluşturulmalıdır
             document.getElementById('btnStart').addEventListener('click', () => {
-                try {
-                    if (!audioContext) {
-                        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    }
-                    if (audioContext.state === 'suspended') {
-                        audioContext.resume();
-                    }
-                    console.log("AudioContext durumu: ", audioContext.state);
-                } catch (e) {
-                    console.error("AudioContext tetikleme hatası: ", e);
-                }
+                handleUserTouch(); 
                 startSystem();
             });
 
