@@ -474,21 +474,22 @@
             if (SpeechRecognition) {
                 recognition = new SpeechRecognition();
                 recognition.lang = 'tr-TR';
-                recognition.continuous = false; 
-                recognition.interimResults = false;
+                // ÖNEMLİ: Tabletlerde VAD yerine Continuous Modu deniyoruz.
+                recognition.continuous = true; 
+                recognition.interimResults = true; // YENİ: Yarım kalan kelimeleri de yakala
                 
                 recognition.onstart = () => {
                     isSpeechRecognitionActive = true;
                     isRecognitionStarting = false;
-                    updateDebugPanel(0, "AÇIK (DİNLİYOR)", "text-green-400 font-bold");
+                    updateDebugPanel(0, "AÇIK (SÜREKLİ DİNLİYOR)", "text-green-400 font-bold");
                 };
                 
-                // YENİ: Motor kapandığında HİÇ BEKLEMEDEN (50ms) kendini yeniden başlatır! (Ouroboros Döngüsü)
                 recognition.onend = () => {
                     isSpeechRecognitionActive = false;
                     isRecognitionStarting = false;
                     updateDebugPanel(0, "KAPALI (YENİDEN BAŞLATILIYOR)", "text-yellow-400");
                     
+                    // Ouroboros: Kapandığı an hiç beklemeden tekrar başlat!
                     if (isSystemRunning && !isTalking && !isThinking && !isRecognitionManuallyStopped) {
                         isRecognitionStarting = true;
                         setTimeout(() => {
@@ -508,7 +509,7 @@
                         return;
                     }
 
-                    // Hata durumunda bile kendini hemen toparla
+                    // Hata verse bile inatla tekrar başlat (no-speech hatalarını bypass eder)
                     if (isSystemRunning && !isTalking && !isThinking && !isRecognitionManuallyStopped) {
                         isRecognitionStarting = true;
                         setTimeout(() => {
@@ -520,21 +521,27 @@
                 recognition.onresult = async (event) => {
                     if (isTalking) return;
 
-                    let transcript = '';
+                    let finalTranscript = '';
+                    let interimTranscript = '';
+
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        transcript += event.results[i][0].transcript;
-                    }
-                    transcript = transcript.toLowerCase().trim();
-                    
-                    // YENİ: Duyulan metni canlı olarak ekranda göster (Hata ayıklama için çok önemli)
-                    const heardEl = document.getElementById('lastHeardText');
-                    if (heardEl) {
-                        heardEl.innerText = transcript;
-                        heardEl.classList.add('text-cyan-300');
-                        setTimeout(() => heardEl.classList.remove('text-cyan-300'), 1000);
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
                     }
 
-                    if (!transcript) return;
+                    // Ekranda canlı olarak yazdır
+                    const heardEl = document.getElementById('lastHeardText');
+                    if (heardEl) {
+                        heardEl.innerText = interimTranscript || finalTranscript;
+                        heardEl.classList.add('text-cyan-300');
+                        setTimeout(() => heardEl.classList.remove('text-cyan-300'), 500);
+                    }
+
+                    if (!finalTranscript) return; // Sadece cümle bittiğinde işleme al
+                    const transcript = finalTranscript.toLowerCase().trim();
 
                     // Esnetilmiş Wake Word (Arkadaş veya Arkadaşım)
                     const wakeWordRegex = /arkada[şs]/i; 
@@ -547,10 +554,13 @@
                         const parts = transcript.split(wakeWordRegex);
                         const command = parts[parts.length - 1].trim();
 
-                        // Eğer sadece "Arkadaş" dendiyse uyan, arkasında cümle varsa komutu işlet
                         if (command.length > 2 && !command.startsWith("ım")) {
                             waitingForCommand = false;
                             sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: false } });
+                            
+                            isRecognitionManuallyStopped = true;
+                            try { recognition.stop(); } catch(e){}
+                            
                             triggerGemini(command, true);
                         } else {
                             waitingForCommand = true;
@@ -565,6 +575,10 @@
                         if (transcript.length > 2) {
                             waitingForCommand = false;
                             sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: false } });
+                            
+                            isRecognitionManuallyStopped = true;
+                            try { recognition.stop(); } catch(e){}
+                            
                             triggerGemini(transcript, true);
                         }
                     }
@@ -599,8 +613,6 @@
                 }
                 const averageVolume = sum / dataArray.length;
                 
-                // VAD artık motoru başlatmak için DEĞİL, sadece görsel panel güncellemesi için kullanılıyor.
-                // Motor, onend eventi sayesinde kendi kendini başlatıyor.
                 if (!isSpeechRecognitionActive && isRecognitionStarting) {
                    updateDebugPanel(averageVolume, "BAŞLATILIYOR...", "text-blue-400");
                 } else if (!isSpeechRecognitionActive) {
@@ -609,7 +621,8 @@
                    updateDebugPanel(averageVolume, "AÇIK", "text-green-400");
                 }
                 
-                // EMNİYET SÜBABI (Watchdog): Eğer sistem bir nedenden ötürü donarsa ve motor kapanırsa zorla uyandır
+                // WATCHDOG: Eğer motor kapandıysa ve açılmıyorsa zorla aç. 
+                // VAD kontrolünü SİLDİK. Artık ses seviyesine bakmaksızın motoru hep açık tutmaya çalışacak.
                 if (!isTalking && !isThinking && !isSpeechRecognitionActive && !isRecognitionStarting && !isRecognitionManuallyStopped) {
                     isRecognitionStarting = true;
                     try { recognition.start(); } catch(e) { isRecognitionStarting = false; }
