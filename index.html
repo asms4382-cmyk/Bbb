@@ -7,13 +7,13 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
    
-    <!-- Yüz Tespiti (Göz Takibi) İçin Gerekli Kütüphaneler -->
+    <!-- Yüz Tespiti İçin Gerekli Kütüphaneler -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface"></script>
    
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
-        #eyeCanvas { display: block; width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; touch-action: manipulation; }
+        #eyeCanvas { display: block; width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
         #startScreen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 50; color: #00ffff; }
         .btn-start { background-color: #00ffff; color: #000; transition: all 0.3s; box-shadow: 0 0 20px rgba(0, 255, 255, 0.5); cursor: pointer; border: none; outline: none; }
         .btn-start:hover { transform: scale(1.05); box-shadow: 0 0 30px rgba(0, 255, 255, 0.8); }
@@ -21,9 +21,6 @@
         #magicMenu { opacity: 0; transform: translateY(20px); pointer-events: none; transition: 0.3s; }
         #magicMenu.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
        
-        /* ALTYAZILARI GİZLE */
-        #subtitle { display: none !important; }
-
         .loader {
             border: 4px solid rgba(0, 255, 255, 0.2);
             border-top: 4px solid #00ffff;
@@ -34,29 +31,49 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* Hata Ayıklama Paneli */
-        #debugPanel { position: fixed; top: 80px; left: 16px; z-index: 150; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; border: 1px solid #333; pointer-events: none; color: white; font-family: monospace; font-size: 12px; min-width: 180px; }
-        #audioMeterContainer { width: 100%; height: 10px; background: #222; border-radius: 5px; overflow: hidden; margin-top: 5px; margin-bottom: 5px; }
-        #audioMeterFill { height: 100%; width: 0%; background: #00ff00; transition: width 0.1s; }
-        #micStatus { font-weight: bold; margin-top: 5px; }
+        /* Telsiz (Push-to-Talk) Butonu */
+        #btnTalk {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 150;
+            width: 80px; height: 80px; border-radius: 50%;
+            background: linear-gradient(135deg, #00ffff, #0088ff);
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.6);
+            border: 4px solid rgba(255,255,255,0.2);
+            color: black; font-size: 32px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: all 0.2s;
+            user-select: none; -webkit-user-select: none;
+        }
+        #btnTalk:active {
+            transform: translateX(-50%) scale(0.9);
+        }
+        #btnTalk.active-talk {
+            box-shadow: 0 0 50px rgba(0, 255, 255, 0.9), inset 0 0 20px rgba(0,0,0,0.3);
+            background: linear-gradient(135deg, #00ffaa, #00cc66);
+            animation: pulse-green 1s infinite alternate;
+        }
+        #btnTalk.thinking {
+            background: linear-gradient(135deg, #ffaa00, #cc6600);
+            box-shadow: 0 0 30px rgba(255, 170, 0, 0.6);
+            pointer-events: none;
+            animation: pulse-orange 1s infinite alternate;
+        }
+        @keyframes pulse-green { 0% { opacity: 0.8; transform: translateX(-50%) scale(1); } 100% { opacity: 1; transform: translateX(-50%) scale(1.05); } }
+        @keyframes pulse-orange { 0% { opacity: 0.8; transform: translateX(-50%) scale(1); } 100% { opacity: 1; transform: translateX(-50%) scale(1.05); } }
+
+        /* Hata Ayıklama Paneli (Küçültüldü) */
+        #debugPanel { position: fixed; top: 80px; left: 16px; z-index: 150; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; border: 1px solid #333; pointer-events: none; color: white; font-family: monospace; font-size: 12px; min-width: 200px; }
     </style>
 </head>
 <body>
 
     <!-- Hata Ayıklama Paneli -->
     <div id="debugPanel" class="hidden">
-        <div>Ses Şiddeti: <span id="volumeText">0</span></div>
-        <div id="audioMeterContainer"><div id="audioMeterFill"></div></div>
-        <div>Ctx: <span id="ctxStateText" class="text-yellow-400">Bekliyor</span></div>
-        <div id="micStatus" class="text-red-400">Motor: BEKLİYOR</div>
-        <div class="mt-2 text-gray-400 border-t border-gray-600 pt-1">Duyulan:</div>
-        <div id="lastHeardText" class="text-white italic break-words w-full min-h-[20px]">-</div>
+        <div>Motor: <span id="micStatus" class="text-yellow-400">BEKLİYOR</span></div>
     </div>
 
     <!-- Kontrol Menüsü -->
     <div class="absolute top-4 left-4 z-[100] flex gap-2 bg-black/50 p-2 rounded-2xl backdrop-blur-md border border-cyan-900/50 interactive">
         <button id="btnFullscreen" class="text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Tam Ekran"><i class="fa-solid fa-expand text-2xl"></i></button>
-        <button id="btnNewTab" class="text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Yeni Sekmede Aç (Ayna Modu)"><i class="fa-solid fa-arrow-up-right-from-square text-2xl"></i></button>
         <div class="w-px h-8 bg-gray-600/50 my-auto mx-1"></div>
         <button id="btnToggleCam" class="text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Kamerayı Ekranda Göster/Gizle"><i class="fa-solid fa-video text-2xl"></i></button>
         <button id="btnSwitchDevice" class="hidden text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Kamera Değiştir"><i class="fa-solid fa-camera-rotate text-2xl"></i></button>
@@ -68,22 +85,22 @@
     <!-- Başlangıç Ekranı -->
     <div id="startScreen">
         <i class="fa-solid fa-robot text-6xl mb-4 animate-pulse"></i>
-        <h1 class="text-3xl font-bold mb-4 text-center">ARKADAŞ Otonom Sistem</h1>
-        <p class="text-cyan-500 mb-8 text-center max-w-md px-4">Kesintisiz dinleme moduna geçmek ve ekranın kapanmasını engellemek için başlatın.</p>
+        <h1 class="text-3xl font-bold mb-4 text-center">ARKADAŞ Asistan</h1>
+        <p class="text-cyan-500 mb-8 text-center max-w-md px-4">Lütfen kamera ve mikrofon izinlerini onaylayın.</p>
         <button id="btnStart" class="btn-start font-bold py-3 px-8 rounded-full text-xl mb-4">Sistemi Başlat</button>
         <div id="loadingIndicator" class="hidden flex-col items-center gap-3">
             <div class="loader"></div>
-            <p class="text-cyan-200 text-sm text-center">Modüller, Kamera ve Ses Tanıma Yükleniyor...<br><span class="text-xs text-cyan-400/70">(Lütfen tarayıcınızın kamera ve mikrofon izinlerini onaylayın)</span></p>
+            <p class="text-cyan-200 text-sm text-center">Modüller Yükleniyor...</p>
         </div>
         <div id="errorBox" class="hidden text-red-400 mt-4 text-center font-semibold bg-red-900/30 p-4 rounded-xl border border-red-500/50 max-w-md mx-4"></div>
     </div>
 
-    <canvas id="eyeCanvas" class="interactive"></canvas>
-    <video id="webcam" autoplay playsinline muted class="hidden fixed bottom-6 left-6 w-48 md:w-64 rounded-2xl border-2 border-cyan-500 shadow-[0_0_20px_rgba(0,255,255,0.4)] z-50 object-cover" style="transform: scaleX(-1);"></video>
+    <canvas id="eyeCanvas"></canvas>
+    <video id="webcam" autoplay playsinline muted class="hidden fixed bottom-6 left-6 w-32 md:w-48 rounded-xl border-2 border-cyan-500 shadow-[0_0_20px_rgba(0,255,255,0.4)] z-50 object-cover" style="transform: scaleX(-1);"></video>
 
     <!-- Resim Gösterme Alanı -->
     <div id="imageDisplay" class="hidden absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-40 bg-black/90 p-6 rounded-3xl border-2 border-cyan-500/50 shadow-[0_0_50px_rgba(0,255,255,0.3)] flex-col items-center justify-center min-w-[300px] min-h-[200px] max-w-[90vw] max-h-[85vh] interactive">
-        <button onclick="closeImage(true)" class="absolute -top-4 -right-4 bg-red-600 text-white rounded-full w-12 h-12 flex items-center justify-center hover:scale-110 transition-transform shadow-[0_0_15px_rgba(220,38,38,0.6)] cursor-pointer z-50">
+        <button onclick="closeImage()" class="absolute -top-4 -right-4 bg-red-600 text-white rounded-full w-12 h-12 flex items-center justify-center hover:scale-110 transition-transform shadow-[0_0_15px_rgba(220,38,38,0.6)] cursor-pointer z-50">
             <i class="fa-solid fa-xmark text-2xl"></i>
         </button>
         <div class="loader mb-2" id="imageLoader"></div>
@@ -105,59 +122,51 @@
     </div>
 
     <!-- Etkileşim UI Katmanı -->
-    <div id="uiLayer" class="absolute bottom-6 right-6 z-20 hidden w-full pr-12 pointer-events-none">
-        <div id="subtitle"></div>
+    <div id="uiLayer" class="absolute bottom-0 left-0 w-full h-full z-20 hidden pointer-events-none">
+        
+        <!-- TELSİZ BUTONU (TEK TIKLA KONUŞ) -->
+        <button id="btnTalk" class="interactive" title="Dokun ve Konuş">
+            <i class="fa-solid fa-microphone"></i>
+        </button>
 
-        <div id="magicMenu" class="flex flex-row-reverse gap-4 mb-4 items-center absolute bottom-16 right-0 origin-bottom-right pointer-events-none interactive">
-            <button onclick="triggerGemini('Okul öncesi çocukların kaba motor becerilerini geliştirecek, evde oynanabilen, hareketli ve hayal gücünü çalıştıran 1 dakikalık kısa bir oyun öner (Örn: hayvan taklidi, zıplama oyunu). MEB Maarif Modeli değerlerine uygun, neşeli ve coşkulu bir dille anlat.', false)" class="group flex flex-col items-center">
-                <div class="w-16 h-16 md:w-22 md:h-22 rounded-full bg-purple-500/90 flex items-center justify-center text-4xl md:text-5xl shadow-[0_0_20px_rgba(168,85,247,0.6)] border-4 border-purple-200 transform group-hover:scale-110 transition-all cursor-pointer">⚽</div>
+        <div id="magicMenu" class="flex flex-col gap-4 mb-4 items-center absolute bottom-36 right-6 origin-bottom-right pointer-events-none interactive">
+            <button onclick="triggerGemini('Okul öncesi çocukların kaba motor becerilerini geliştirecek, evde oynanabilen, hareketli ve hayal gücünü çalıştıran 1 dakikalık kısa bir oyun öner.', false)" class="group flex flex-col items-center">
+                <div class="w-14 h-14 rounded-full bg-purple-500/90 flex items-center justify-center text-2xl shadow-[0_0_20px_rgba(168,85,247,0.6)] border-2 border-purple-200 cursor-pointer">⚽</div>
             </button>
            
-            <button onclick="triggerGemini('Okul öncesi (4-6 yaş) çocukların bilişsel gelişimine uygun; doğa, hayvanlar veya eşyalarla ilgili çok kolay, eğlenceli ve kafiyeli bir bilmece sor. Cevabını hemen söyleme, çocuğun bulması için heveslendir.', false)" class="group flex flex-col items-center">
-                <div class="w-16 h-16 md:w-22 md:h-22 rounded-full bg-indigo-500/90 flex items-center justify-center text-4xl md:text-5xl shadow-[0_0_20px_rgba(99,102,241,0.6)] border-4 border-indigo-200 transform group-hover:scale-110 transition-all cursor-pointer">❓</div>
+            <button onclick="triggerGemini('Okul öncesi (4-6 yaş) çocukların bilişsel gelişimine uygun; hayvanlarla ilgili çok kolay, eğlenceli ve kafiyeli bir bilmece sor.', false)" class="group flex flex-col items-center">
+                <div class="w-14 h-14 rounded-full bg-indigo-500/90 flex items-center justify-center text-2xl shadow-[0_0_20px_rgba(99,102,241,0.6)] border-2 border-indigo-200 cursor-pointer">❓</div>
             </button>
 
-            <button onclick="triggerGemini('Şu an kamerada gördüğün nesne veya ortamı kullanarak, 4-6 yaş çocuklara uygun, içinde yardımlaşma, doğa sevgisi veya dostluk gibi MEB Maarif Modeli değerlerinin geçtiği çok kısa (en fazla 2-3 cümlelik) şirin bir masal uydur.', true)" class="group flex flex-col items-center">
-                <div class="w-16 h-16 md:w-22 md:h-22 rounded-full bg-cyan-500/90 flex items-center justify-center text-4xl md:text-5xl shadow-[0_0_20px_rgba(0,255,255,0.6)] border-4 border-cyan-200 transform group-hover:scale-110 transition-all cursor-pointer">📖</div>
+            <button onclick="triggerGemini('Şu an kamerada gördüğün nesneyi kullanarak, 4-6 yaş çocuklara uygun, doğa sevgisi ile ilgili çok kısa şirin bir masal uydur.', true)" class="group flex flex-col items-center">
+                <div class="w-14 h-14 rounded-full bg-cyan-500/90 flex items-center justify-center text-2xl shadow-[0_0_20px_rgba(0,255,255,0.6)] border-2 border-cyan-200 cursor-pointer">📖</div>
             </button>
         </div>
-        <button id="btnToggleMagic" class="bg-cyan-900/90 text-cyan-300 p-4 rounded-full w-16 h-16 border border-cyan-400/50 float-right hover:scale-110 transition-transform shadow-[0_0_20px_rgba(0,255,255,0.4)] relative z-10 interactive">
-            <i class="fa-solid fa-wand-magic-sparkles text-2xl"></i>
+        <button id="btnToggleMagic" class="absolute bottom-10 right-6 bg-cyan-900/90 text-cyan-300 p-4 rounded-full w-14 h-14 border border-cyan-400/50 hover:scale-110 shadow-[0_0_20px_rgba(0,255,255,0.4)] interactive">
+            <i class="fa-solid fa-wand-magic-sparkles text-xl"></i>
         </button>
     </div>
 
     <!-- Sistem Çalışırken Gösterilecek Hata Kutusu -->
-    <div id="runtimeErrorBox" class="hidden fixed top-20 left-1/2 transform -translate-x-1/2 z-[300] bg-red-900/90 text-red-100 px-6 py-3 rounded-2xl border border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.6)] font-semibold text-center transition-opacity duration-300 pointer-events-none">
-    </div>
+    <div id="runtimeErrorBox" class="hidden fixed top-20 left-1/2 transform -translate-x-1/2 z-[300] bg-red-900/90 text-red-100 px-6 py-3 rounded-2xl border border-red-500 shadow-[0_0_30px_rgba(220,38,38,0.6)] font-semibold text-center transition-opacity duration-300 pointer-events-none"></div>
 
     <script>
-        const isMirrorMode = window.name && window.name.startsWith('ARKADAS_MIRROR');
-       
         const canvas = document.getElementById('eyeCanvas');
         const ctx = canvas.getContext('2d');
         const video = document.getElementById('webcam');
-        const btnFullscreen = document.getElementById('btnFullscreen');
-        const btnNewTab = document.getElementById('btnNewTab');
-        const btnSwitchDevice = document.getElementById('btnSwitchDevice');
-        const errorBox = document.getElementById('errorBox');
+        const btnTalk = document.getElementById('btnTalk');
        
         let isSystemRunning = false;
-        let isAwake = false;
         let isThinking = false;
         let isTalking = false;
-        let waitingForCommand = false;
         let chatHistory = [];
 
         let videoDevices = [];
         let currentDeviceIndex = 0;
        
-        // Ekran Uyanık Tutma (Wake Lock)
         let wakeLock = null;
-
-        // API anahtarı çalışma ortamı tarafından otomatik enjekte edilir
         const apiKey = "";
         let ttsAudioContext = null;
-        let audioContext = null; 
 
         let faceModel = null;
         let targetX = window.innerWidth / 2;
@@ -169,21 +178,6 @@
         let eyeState = { w: 70, h: 105, tilt: 0, pR: 25 };
         
         let globalMicrophoneStream = null;
-
-        // API Üstel Geri Çekilme
-        async function fetchWithRetry(url, options, maxRetries = 5) {
-            const delays = [1000, 2000, 4000, 8000, 16000];
-            for (let i = 0; i < maxRetries; i++) {
-                try {
-                    const response = await fetch(url, options);
-                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                    return await response.json();
-                } catch (err) {
-                    if (i === maxRetries - 1) throw err;
-                    await new Promise(resolve => setTimeout(resolve, delays[i]));
-                }
-            }
-        }
 
         // --- EKRAN UYANIK TUTMA (WAKE LOCK) ---
         async function requestWakeLock() {
@@ -203,169 +197,12 @@
             }
         });
 
-        // --- GLOBAL ETKİLEŞİM KİLİDİ VE MANUEL UYANDIRMA ---
-        let isAudioUnlocked = false;
-        const handleUserTouch = () => {
-            // 1. AudioContext Kilit Kırıcı
-            if (!isAudioUnlocked) {
-                try {
-                    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    if (audioContext.state !== 'running') audioContext.resume();
-                    
-                    const osc = audioContext.createOscillator();
-                    const gain = audioContext.createGain();
-                    gain.gain.value = 0;
-                    osc.connect(gain);
-                    gain.connect(audioContext.destination);
-                    osc.start(0);
-                    osc.stop(audioContext.currentTime + 0.1);
-                    isAudioUnlocked = true;
-                } catch(e) {}
-            }
-
-            // 2. YENİ: Ekrana dokunulduğunda asistanı ZORLA UYANDIR!
-            if (isSystemRunning && !isAwake && !isTalking && !isThinking) {
-                isAwake = true;
-                waitingForCommand = true;
-                currentEmotion = 'MUTLU';
-                playWakeSound();
-                resetSleepTimer();
-                sendSyncMessage({ type: 'AWAKE_STATE', payload: { state: true, emotion: 'MUTLU' } });
-                sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: true } });
-            }
-        };
-
-        ['click', 'touchstart'].forEach(evt => {
-            window.addEventListener(evt, handleUserTouch, { capture: true, passive: true });
-        });
-
-        // --- TAM EKRAN VE AYNA MODU ---
-        btnFullscreen.addEventListener('click', () => {
+        // --- TAM EKRAN ---
+        document.getElementById('btnFullscreen').addEventListener('click', () => {
             if (!document.fullscreenElement) {
-                let promise = document.documentElement.requestFullscreen();
-                if (promise !== undefined) promise.catch(err => console.warn("Tam ekran engellendi:", err));
+                document.documentElement.requestFullscreen().catch(()=>{});
             } else {
-                if (document.exitFullscreen) {
-                    let promise = document.exitFullscreen();
-                    if (promise !== undefined) promise.catch(err => console.warn("Tam ekran çıkışı engellendi:", err));
-                }
-            }
-        });
-
-        const mirrors = new Set();
-        window.addEventListener('message', (event) => {
-            if (!event.data || !event.data.type) return;
-            const { type, payload } = event.data;
-           
-            if (type === 'MIRROR_READY') {
-                if (event.source) {
-                    mirrors.add(event.source);
-                    event.source.postMessage({
-                        type: 'FULL_STATE_SYNC',
-                        payload: {
-                            isAwake,
-                            currentEmotion,
-                            isThinking,
-                            isTalking,
-                            waitingForCommand,
-                            imageUrl: document.getElementById('displayedImage').src,
-                            imageVisible: !document.getElementById('imageDisplay').classList.contains('hidden')
-                        }
-                    }, '*');
-                }
-                return;
-            }
-
-            if (type === 'FULL_STATE_SYNC' && isMirrorMode) {
-                isAwake = payload.isAwake;
-                currentEmotion = payload.currentEmotion;
-                isThinking = payload.isThinking;
-                isTalking = payload.isTalking;
-                waitingForCommand = payload.waitingForCommand;
-                if (payload.imageVisible && payload.imageUrl) {
-                    showImage(payload.imageUrl);
-                } else {
-                    closeImage(false);
-                }
-            }
-            else if (type === 'GEMINI_RESPONSE') {
-                currentEmotion = payload.emotion;
-                isThinking = false;
-            }
-            else if (type === 'SPEECH_STATE') {
-                isTalking = payload;
-                if (!payload) currentEmotion = 'NORMAL';
-            }
-            else if (type === 'CLOSE_IMAGE') {
-                closeImage(false);
-            }
-            else if (type === 'SHOW_IMAGE_SYNC') {
-                showImage(payload.url);
-            }
-            else if (type === 'SHOW_IMAGE_LOADING') {
-                showImageLoading();
-            }
-            else if (type === 'SHOW_IMAGE_ERROR') {
-                showImageError();
-            }
-            else if (type === 'FACE_UPDATE' && isMirrorMode) {
-                targetX = canvas.width - (payload.normX * canvas.width);
-                targetY = payload.normY * canvas.height;
-                if (payload.isAwake !== undefined) isAwake = payload.isAwake;
-            }
-            else if (type === 'TRIGGER_GEMINI' && !isMirrorMode) {
-                triggerGemini(payload.prompt, payload.useVision);
-            }
-            else if (type === 'THINKING_STATE' && isMirrorMode) {
-                isThinking = payload.state;
-            }
-            else if (type === 'LISTENING_STATE' && isMirrorMode) {
-                waitingForCommand = payload.state;
-            }
-            else if (type === 'AWAKE_STATE' && isMirrorMode) {
-                isAwake = payload.state;
-                if (payload.emotion) currentEmotion = payload.emotion;
-            }
-            else if (type === 'MAGIC_BUTTON' && !isMirrorMode) {
-                document.getElementById('btnToggleMagic').click();
-            }
-        });
-
-        function sendSyncMessage(msg) {
-            if (isMirrorMode) {
-                if (window.opener && !window.opener.closed) {
-                    window.opener.postMessage(msg, '*');
-                }
-            } else {
-                mirrors.forEach(win => {
-                    try {
-                        if (!win.closed) win.postMessage(msg, '*');
-                        else mirrors.delete(win);
-                    } catch(e) { mirrors.delete(win); }
-                });
-            }
-        }
-
-        btnNewTab.addEventListener('click', () => {
-            try {
-                const cloneNode = document.documentElement.cloneNode(true);
-                const elementsToReset = ['startScreen', 'uiLayer', 'btnStart', 'loadingIndicator', 'errorBox'];
-                elementsToReset.forEach(id => {
-                    const el = cloneNode.querySelector('#' + id);
-                    if (el) el.removeAttribute('style');
-                });
-               
-                const html = '<!DOCTYPE html>\n' + cloneNode.outerHTML;
-                const mirrorName = 'ARKADAS_MIRROR_' + Date.now();
-                const newWin = window.open('', mirrorName);
-               
-                if (newWin) {
-                    newWin.document.open();
-                    newWin.document.write(html);
-                    newWin.document.close();
-                }
-            } catch (err) {
-                console.error("Yeni pencere oluşturulamadı:", err);
+                document.exitFullscreen().catch(()=>{});
             }
         });
 
@@ -373,20 +210,6 @@
         function initAudio() {
             if (!ttsAudioContext) ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
             if (ttsAudioContext.state === 'suspended') ttsAudioContext.resume();
-        }
-
-        function playWakeSound() {
-            initAudio();
-            const osc = ttsAudioContext.createOscillator();
-            const gain = ttsAudioContext.createGain();
-            osc.connect(gain); gain.connect(ttsAudioContext.destination);
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(800, ttsAudioContext.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(1200, ttsAudioContext.currentTime + 0.1);
-            gain.gain.setValueAtTime(0, ttsAudioContext.currentTime);
-            gain.gain.linearRampToValueAtTime(0.2, ttsAudioContext.currentTime + 0.05);
-            gain.gain.linearRampToValueAtTime(0, ttsAudioContext.currentTime + 0.2);
-            osc.start(); osc.stop(ttsAudioContext.currentTime + 0.2);
         }
 
         function playThinkingSound() {
@@ -403,262 +226,134 @@
             osc.start(); osc.stop(ttsAudioContext.currentTime + 0.3);
         }
 
-        // --- KESİNTİSİZ SES TANIMA SİSTEMİ ---
+        function playStartListenSound() {
+            initAudio();
+            const osc = ttsAudioContext.createOscillator();
+            const gain = ttsAudioContext.createGain();
+            osc.connect(gain); gain.connect(ttsAudioContext.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(600, ttsAudioContext.currentTime);
+            osc.frequency.linearRampToValueAtTime(800, ttsAudioContext.currentTime + 0.1);
+            gain.gain.setValueAtTime(0, ttsAudioContext.currentTime);
+            gain.gain.linearRampToValueAtTime(0.2, ttsAudioContext.currentTime + 0.05);
+            gain.gain.linearRampToValueAtTime(0, ttsAudioContext.currentTime + 0.15);
+            osc.start(); osc.stop(ttsAudioContext.currentTime + 0.15);
+        }
+
+        // --- TELSİZ (MANUEL DİNLEME) SİSTEMİ ---
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
-        let sleepTimer;
-        let analyser = null;
-        let dataArray = null;
-        let isSpeechRecognitionActive = false; 
-        let isRecognitionStarting = false;     
-        let isRecognitionManuallyStopped = false;
+        let currentTranscript = "";
+        let isRecognizing = false; // InvalidStateError için güvenlik kilidi
 
-        function updateDebugPanel(volume, statusText, statusColor) {
-            const volEl = document.getElementById('volumeText');
-            if (volEl) volEl.innerText = volume.toFixed(2);
-            
-            const fillEl = document.getElementById('audioMeterFill');
-            if (fillEl) fillEl.style.width = Math.min(100, (volume / 100) * 100) + '%';
-            
+        function updateDebugPanel(statusText, statusColor) {
             const statusEl = document.getElementById('micStatus');
             if (statusEl) {
-                statusEl.innerText = "Motor: " + statusText;
+                statusEl.innerText = statusText;
                 statusEl.className = statusColor;
             }
-
-            const ctxEl = document.getElementById('ctxStateText');
-            if (ctxEl && audioContext) {
-                ctxEl.innerText = audioContext.state;
-                ctxEl.className = audioContext.state === 'running' ? "text-green-400 font-bold" : "text-yellow-400";
-            }
         }
 
-        function resetSleepTimer() {
-            clearTimeout(sleepTimer);
-            sleepTimer = setTimeout(() => {
-                isAwake = false;
-                waitingForCommand = false;
-                sendSyncMessage({ type: 'AWAKE_STATE', payload: { state: false } });
-                sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: false } });
-            }, 60000);
-        }
-        
-        async function initContinuousListening() {
-            if (!globalMicrophoneStream || isMirrorMode) {
-                updateDebugPanel(0, "MİKROFON YOK", "text-red-500 font-bold");
+        function setupPushToTalk() {
+            if (!SpeechRecognition) {
+                showRuntimeError("Tarayıcınız ses tanımayı desteklemiyor.");
+                btnTalk.style.display = 'none';
                 return;
             }
+
+            recognition = new SpeechRecognition();
+            // Türkçe dil paketi bazen sorun yaratabiliyor, ama Türkçe için gerekli
+            recognition.lang = 'tr-TR';
+            recognition.continuous = false; // Sessizlik olduğunda otomatik dursun
             
-            try {
-                if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                if (audioContext.state === 'suspended') await audioContext.resume();
-                
-                const source = audioContext.createMediaStreamSource(globalMicrophoneStream);
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 256;
-                analyser.smoothingTimeConstant = 0.8; 
-                
-                const dummyGain = audioContext.createGain();
-                dummyGain.gain.value = 0.001; 
-                
-                source.connect(analyser);
-                analyser.connect(dummyGain);
-                dummyGain.connect(audioContext.destination);
-                
-                const bufferLength = analyser.frequencyBinCount;
-                dataArray = new Uint8Array(bufferLength);
-            } catch (err) {
-                updateDebugPanel(0, "AUDIO API HATASI", "text-red-500 font-bold");
-            }
-            
-            if (SpeechRecognition) {
-                recognition = new SpeechRecognition();
-                recognition.lang = 'tr-TR';
-                // ÖNEMLİ: Tabletlerde VAD yerine Continuous Modu deniyoruz.
-                recognition.continuous = true; 
-                recognition.interimResults = true; // YENİ: Yarım kalan kelimeleri de yakala
-                
-                recognition.onstart = () => {
-                    isSpeechRecognitionActive = true;
-                    isRecognitionStarting = false;
-                    updateDebugPanel(0, "AÇIK (SÜREKLİ DİNLİYOR)", "text-green-400 font-bold");
-                };
-                
-                recognition.onend = () => {
-                    isSpeechRecognitionActive = false;
-                    isRecognitionStarting = false;
-                    updateDebugPanel(0, "KAPALI (YENİDEN BAŞLATILIYOR)", "text-yellow-400");
-                    
-                    // Ouroboros: Kapandığı an hiç beklemeden tekrar başlat!
-                    if (isSystemRunning && !isTalking && !isThinking && !isRecognitionManuallyStopped) {
-                        isRecognitionStarting = true;
-                        setTimeout(() => {
-                            try { recognition.start(); } catch(e) { isRecognitionStarting = false; }
-                        }, 50); 
-                    }
-                };
-                
-                recognition.onerror = (e) => {
-                    isSpeechRecognitionActive = false;
-                    isRecognitionStarting = false;
-                    updateDebugPanel(0, "HATA: " + e.error, "text-red-400 font-bold");
-                    
-                    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-                        isRecognitionManuallyStopped = true;
-                        showRuntimeError("Mikrofon izni reddedildi.");
-                        return;
-                    }
+            // ANDROID 13 KRİTİK DEĞİŞİKLİK: 
+            // Canlı sonuçları (interim) KAPATTIK. Çünkü bazı Android cihazlar bu veriyi işlerken kilitleniyor.
+            // Sadece sen susup konuşmayı bitirdiğinde "isFinal" sonucunu tek seferde verecek.
+            recognition.interimResults = false; 
 
-                    // Hata verse bile inatla tekrar başlat (no-speech hatalarını bypass eder)
-                    if (isSystemRunning && !isTalking && !isThinking && !isRecognitionManuallyStopped) {
-                        isRecognitionStarting = true;
-                        setTimeout(() => {
-                            try { recognition.start(); } catch(err) { isRecognitionStarting = false; }
-                        }, 50);
-                    }
-                };
-                
-                recognition.onresult = async (event) => {
-                    if (isTalking) return;
+            recognition.onstart = () => {
+                isRecognizing = true;
+                btnTalk.classList.add('active-talk');
+                updateDebugPanel("DİNLİYOR (Konuşun...)", "text-green-400 font-bold");
+                currentTranscript = "";
+            };
 
-                    let finalTranscript = '';
-                    let interimTranscript = '';
-
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
-                            finalTranscript += event.results[i][0].transcript;
-                        } else {
-                            interimTranscript += event.results[i][0].transcript;
-                        }
-                    }
-
-                    // Ekranda canlı olarak yazdır
-                    const heardEl = document.getElementById('lastHeardText');
-                    if (heardEl) {
-                        heardEl.innerText = interimTranscript || finalTranscript;
-                        heardEl.classList.add('text-cyan-300');
-                        setTimeout(() => heardEl.classList.remove('text-cyan-300'), 500);
-                    }
-
-                    if (!finalTranscript) return; // Sadece cümle bittiğinde işleme al
-                    const transcript = finalTranscript.toLowerCase().trim();
-
-                    // Esnetilmiş Wake Word (Arkadaş veya Arkadaşım)
-                    const wakeWordRegex = /arkada[şs]/i; 
-                    const hasWakeWord = wakeWordRegex.test(transcript);
-                   
-                    if (hasWakeWord) {
-                        isAwake = true;
-                        resetSleepTimer();
-
-                        const parts = transcript.split(wakeWordRegex);
-                        const command = parts[parts.length - 1].trim();
-
-                        if (command.length > 2 && !command.startsWith("ım")) {
-                            waitingForCommand = false;
-                            sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: false } });
-                            
-                            isRecognitionManuallyStopped = true;
-                            try { recognition.stop(); } catch(e){}
-                            
-                            triggerGemini(command, true);
-                        } else {
-                            waitingForCommand = true;
-                            currentEmotion = 'MUTLU';
-                            playWakeSound();
-                            sendSyncMessage({ type: 'AWAKE_STATE', payload: { state: true, emotion: 'MUTLU' } });
-                            sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: true } });
-                        }
-                    }
-                    else if (isAwake || waitingForCommand) {
-                        resetSleepTimer();
-                        if (transcript.length > 2) {
-                            waitingForCommand = false;
-                            sendSyncMessage({ type: 'LISTENING_STATE', payload: { state: false } });
-                            
-                            isRecognitionManuallyStopped = true;
-                            try { recognition.stop(); } catch(e){}
-                            
-                            triggerGemini(transcript, true);
-                        }
-                    }
-                };
-            } else {
-                updateDebugPanel(0, "DESTEKLENMİYOR", "text-red-500 font-bold");
-                showRuntimeError("Tarayıcınız SpeechRecognition özelliğini desteklemiyor.");
-            }
-            
-            // İlk başlatma
-            if (!isSpeechRecognitionActive && !isRecognitionStarting) {
-                isRecognitionStarting = true;
-                setTimeout(() => { try { recognition.start(); } catch(e) { isRecognitionStarting = false; } }, 100);
-            }
-
-            detectVoiceActivity();
-        }
-        
-        function detectVoiceActivity() {
-            if (!isSystemRunning || isMirrorMode) return;
-            
-            if (audioContext && audioContext.state !== 'running') {
-                audioContext.resume();
-            }
-
-            if (analyser && dataArray) {
-                analyser.getByteFrequencyData(dataArray);
-                
-                let sum = 0;
-                for (let i = 0; i < dataArray.length; i++) {
-                    sum += dataArray[i];
+            recognition.onresult = (event) => {
+                // Sadece son onaylanmış cümleyi al (interim kapalı olduğu için hep final gelir)
+                if (event.results.length > 0) {
+                    currentTranscript = event.results[0][0].transcript;
+                    updateDebugPanel("İŞLENİYOR...", "text-blue-400 font-bold");
                 }
-                const averageVolume = sum / dataArray.length;
+            };
+
+            recognition.onerror = (e) => {
+                isRecognizing = false;
+                console.error("Ses Tanıma Hatası:", e.error);
+                btnTalk.classList.remove('active-talk');
+                updateDebugPanel("HATA: " + e.error, "text-red-400");
+                if (e.error === 'not-allowed') showRuntimeError("Mikrofon izni yok!");
+            };
+
+            recognition.onend = () => {
+                isRecognizing = false;
+                btnTalk.classList.remove('active-talk');
+                updateDebugPanel("BEKLİYOR", "text-yellow-400");
                 
-                if (!isSpeechRecognitionActive && isRecognitionStarting) {
-                   updateDebugPanel(averageVolume, "BAŞLATILIYOR...", "text-blue-400");
-                } else if (!isSpeechRecognitionActive) {
-                   updateDebugPanel(averageVolume, "BEKLİYOR", "text-yellow-400");
+                const finalCommand = currentTranscript.trim();
+                // 3 harf kısıtlamasını kaldırdım, sadece boş olmamasını kontrol ediyorum.
+                if (finalCommand !== "") {
+                    triggerGemini(finalCommand, true); // Kameradan da bakarak cevapla
+                }
+                currentTranscript = "";
+            };
+
+            const toggleListening = (e) => {
+                e.preventDefault(); 
+                if (isThinking || isTalking) return;
+                
+                if (isRecognizing) {
+                    // Dinliyorsa durdur ve cevabı yolla
+                    try { recognition.stop(); } catch(err) {}
                 } else {
-                   updateDebugPanel(averageVolume, "AÇIK", "text-green-400");
+                    // Dinlemiyorsa başlat
+                    try {
+                        playStartListenSound();
+                        recognition.start();
+                    } catch(err) {
+                        console.warn("Başlatılamadı:", err);
+                    }
                 }
-                
-                // WATCHDOG: Eğer motor kapandıysa ve açılmıyorsa zorla aç. 
-                // VAD kontrolünü SİLDİK. Artık ses seviyesine bakmaksızın motoru hep açık tutmaya çalışacak.
-                if (!isTalking && !isThinking && !isSpeechRecognitionActive && !isRecognitionStarting && !isRecognitionManuallyStopped) {
-                    isRecognitionStarting = true;
-                    try { recognition.start(); } catch(e) { isRecognitionStarting = false; }
-                }
-            } 
-            
-            requestAnimationFrame(detectVoiceActivity);
+            };
+
+            btnTalk.addEventListener('click', toggleListening);
         }
 
         // --- YÜZ TESPİTİ (GÖZ TAKİBİ) ---
-        async function detectFaceLoop() {
-            if (!isSystemRunning || !faceModel || isMirrorMode) return;
-           
-            if (video.readyState >= 3 && video.videoWidth > 0) {
-                try {
-                    const predictions = await faceModel.estimateFaces(video, false);
-                    if (predictions.length > 0) {
-                        const face = predictions[0];
-                        const faceCenterX = (face.topLeft[0] + face.bottomRight[0]) / 2;
-                        const faceCenterY = (face.topLeft[1] + face.bottomRight[1]) / 2;
-                       
-                        targetX = canvas.width - (faceCenterX / video.videoWidth) * canvas.width;
-                        targetY = (faceCenterY / video.videoHeight) * canvas.height;
-                       
-                        sendSyncMessage({
-                            type: 'FACE_UPDATE',
-                            payload: { normX: faceCenterX / video.videoWidth, normY: faceCenterY / video.videoHeight, isAwake }
-                        });
-                    } else {
-                        targetX = canvas.width / 2;
-                        targetY = canvas.height / 2;
-                        sendSyncMessage({ type: 'FACE_UPDATE', payload: { normX: 0.5, normY: 0.5, isAwake } });
-                    }
-                } catch (e) {}
-            }
-            setTimeout(detectFaceLoop, 50);
+        async function startFaceDetection() {
+            if (!faceModel) return;
+            
+            const detect = async () => {
+                if (!isSystemRunning) return;
+                
+                if (video.readyState >= 2 && video.videoWidth > 0) {
+                    try {
+                        const predictions = await faceModel.estimateFaces(video, false);
+                        if (predictions.length > 0) {
+                            const face = predictions[0];
+                            const faceCenterX = (face.topLeft[0] + face.bottomRight[0]) / 2;
+                            const faceCenterY = (face.topLeft[1] + face.bottomRight[1]) / 2;
+                           
+                            targetX = canvas.width - (faceCenterX / video.videoWidth) * canvas.width;
+                            targetY = (faceCenterY / video.videoHeight) * canvas.height;
+                        } else {
+                            targetX = canvas.width / 2;
+                            targetY = canvas.height / 2;
+                        }
+                    } catch (e) {}
+                }
+                setTimeout(detect, 100);
+            };
+            detect();
         }
 
         // --- ÇİZİM ve ANİMASYON ---
@@ -702,43 +397,35 @@
             if (isThinking) { baseEyeY -= 25; pupilOffsetY -= 25; }
 
             let eyeColor = '#00ffff';
-            if (waitingForCommand) eyeColor = '#00ff00';
+            if (btnTalk.classList.contains('active-talk')) eyeColor = '#00ff00';
             else if (isThinking) eyeColor = '#ffaa00';
-            else if (!isAwake) eyeColor = '#006666';
 
             ctx.strokeStyle = eyeColor;
             ctx.fillStyle = eyeColor;
             ctx.lineWidth = 18;
             ctx.lineCap = 'round';
 
-            if (!isAwake) {
-                [-140, 140].forEach(offset => {
-                    ctx.beginPath();
-                    ctx.arc(cx + offset, cy, 70, 0, Math.PI);
-                    ctx.stroke();
-                });
-            } else {
-                [-140, 140].forEach((offset, index) => {
-                    let isLeft = index === 0;
-                    let tilt = isLeft ? eyeState.tilt : -eyeState.tilt;
-                   
-                    ctx.save();
-                    ctx.translate(baseEyeX + offset, baseEyeY);
-                    ctx.rotate(tilt);
-                   
-                    ctx.beginPath();
-                    ctx.ellipse(0, 0, eyeState.w, eyeState.h, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                   
-                    ctx.beginPath();
-                    ctx.arc(pupilOffsetX, pupilOffsetY + 8, eyeState.pR, 0, Math.PI * 2);
-                    ctx.fillStyle = "#000";
-                    ctx.fill();
-                   
-                    ctx.restore();
-                    ctx.fillStyle = eyeColor;
-                });
-            }
+            [-140, 140].forEach((offset, index) => {
+                let isLeft = index === 0;
+                let tilt = isLeft ? eyeState.tilt : -eyeState.tilt;
+               
+                ctx.save();
+                ctx.translate(baseEyeX + offset, baseEyeY);
+                ctx.rotate(tilt);
+               
+                ctx.beginPath();
+                ctx.ellipse(0, 0, eyeState.w, eyeState.h, 0, 0, Math.PI * 2);
+                ctx.fill();
+               
+                ctx.beginPath();
+                ctx.arc(pupilOffsetX, pupilOffsetY + 8, eyeState.pR, 0, Math.PI * 2);
+                ctx.fillStyle = "#000";
+                ctx.fill();
+               
+                ctx.restore();
+                ctx.fillStyle = eyeColor;
+            });
+            
             requestAnimationFrame(animate);
         }
 
@@ -751,118 +438,63 @@
             return c.toDataURL('image/jpeg').split(',')[1];
         }
 
+        async function fetchWithRetry(url, options, maxRetries = 3) {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return await response.json();
+                } catch (err) {
+                    if (i === maxRetries - 1) throw err;
+                    await new Promise(r => setTimeout(r, 1000 * (i+1)));
+                }
+            }
+        }
+
         async function generateImageWithImagen(promptText) {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`;
-            const payload = {
-                instances: [{ prompt: promptText }],
-                parameters: { sampleCount: 1 }
-            };
-            const response = await fetchWithRetry(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
+            const payload = { instances: [{ prompt: promptText }], parameters: { sampleCount: 1 } };
+            const response = await fetchWithRetry(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (response.predictions && response.predictions[0]) {
                 return `data:image/png;base64,${response.predictions[0].bytesBase64Encoded}`;
             }
-            throw new Error("Resim oluşturulamadı");
+            throw new Error("Resim başarısız");
         }
 
         function showImageLoading() {
-            const container = document.getElementById('imageDisplay');
-            const img = document.getElementById('displayedImage');
-            const loader = document.getElementById('imageLoader');
-            const errText = document.getElementById('imageErrorText');
-            const genText = document.getElementById('imageGeneratingText');
-
-            img.classList.add('hidden');
-            if (errText) errText.classList.add('hidden');
-            loader.classList.remove('hidden');
-            genText.classList.remove('hidden');
-           
-            container.classList.remove('hidden');
-            container.classList.add('flex');
+            document.getElementById('imageDisplay').classList.remove('hidden');
+            document.getElementById('imageDisplay').classList.add('flex');
+            document.getElementById('displayedImage').classList.add('hidden');
+            document.getElementById('imageLoader').classList.remove('hidden');
+            document.getElementById('imageGeneratingText').classList.remove('hidden');
+            document.getElementById('imageErrorText').classList.add('hidden');
         }
 
-        function showImageError() {
-            const container = document.getElementById('imageDisplay');
-            const loader = document.getElementById('imageLoader');
-            const errText = document.getElementById('imageErrorText');
-            const genText = document.getElementById('imageGeneratingText');
-            const img = document.getElementById('displayedImage');
-           
-            loader.classList.add('hidden');
-            genText.classList.add('hidden');
-            img.classList.add('hidden');
-            if (errText) errText.classList.remove('hidden');
-           
-            container.classList.remove('hidden');
-            container.classList.add('flex');
-           
-            clearTimeout(imageCloseTimer);
-            imageCloseTimer = setTimeout(() => closeImage(true), 5000);
-        }
-
-        let imageCloseTimer = null;
         function showImage(url) {
-            const container = document.getElementById('imageDisplay');
-            const img = document.getElementById('displayedImage');
-            const loader = document.getElementById('imageLoader');
-            const genText = document.getElementById('imageGeneratingText');
-            const errText = document.getElementById('imageErrorText');
-           
-            loader.classList.add('hidden');
-            genText.classList.add('hidden');
-            if (errText) errText.classList.add('hidden');
-            img.src = url;
-            img.classList.remove('hidden');
-
-            container.classList.remove('hidden');
-            container.classList.add('flex');
-
-            clearTimeout(imageCloseTimer);
-            imageCloseTimer = setTimeout(() => closeImage(true), 15000);
+            document.getElementById('imageLoader').classList.add('hidden');
+            document.getElementById('imageGeneratingText').classList.add('hidden');
+            document.getElementById('displayedImage').src = url;
+            document.getElementById('displayedImage').classList.remove('hidden');
+            clearTimeout(window.imageCloseTimer);
+            window.imageCloseTimer = setTimeout(closeImage, 15000);
         }
 
-        function closeImage(sync = false) {
-            const container = document.getElementById('imageDisplay');
-            container.classList.add('hidden');
-            container.classList.remove('flex');
+        function closeImage() {
+            document.getElementById('imageDisplay').classList.add('hidden');
+            document.getElementById('imageDisplay').classList.remove('flex');
             document.getElementById('displayedImage').src = "";
-            clearTimeout(imageCloseTimer);
-            if (sync) {
-                sendSyncMessage({ type: 'CLOSE_IMAGE' });
-            }
         }
         window.closeImage = closeImage;
 
-        // --- GEMINI (YAPAY ZEKA) ENTEGRASYONU ---
+        // --- GEMINI ENTEGRASYONU ---
         async function triggerGemini(prompt, useVision) {
             if (isThinking || isTalking) return;
            
-            if (isMirrorMode) {
-                sendSyncMessage({ type: 'TRIGGER_GEMINI', payload: { prompt, useVision } });
-                return;
-            }
-           
             isThinking = true;
-            if (recognition) { 
-                try { recognition.stop(); } catch(e){} 
-                isSpeechRecognitionActive = false;
-                isRecognitionStarting = false;
-            }
+            btnTalk.classList.add('thinking');
+            btnTalk.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             playThinkingSound();
-            sendSyncMessage({ type: 'THINKING_STATE', payload: { state: true } });
             document.getElementById('magicMenu').classList.remove('show');
-
-            const thinkingTimeout = setTimeout(() => {
-                if (isThinking) {
-                    isThinking = false;
-                    currentEmotion = 'UZGUN';
-                    sendSyncMessage({ type: 'THINKING_STATE', payload: { state: false } });
-                }
-            }, 20000);
 
             let imageBase64 = useVision ? captureFrame() : null;
 
@@ -870,12 +502,12 @@
             if (imageBase64) userParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64 } });
            
             chatHistory.push({ role: "user", parts: userParts });
-            if (chatHistory.length > 10) chatHistory = chatHistory.slice(chatHistory.length - 10);
+            if (chatHistory.length > 6) chatHistory = chatHistory.slice(chatHistory.length - 6);
 
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
             const payload = {
-                systemInstruction: { parts: [{ text: "Sen ARKADAŞ adında sevimli, enerjik ve yardımsever sesli bir yapay zeka asistanısın. Senin bir kameran (gözlerin) ve mikrofonun (kulakların) var. Etrafı GÖREBİLİYOR ve duyabiliyorsun. Kullanıcı sana bir şey gösterdiğinde ona bakarak cevap ver. 'Kameram yok', 'Seni göremiyorum' gibi cümleler ASLA KULLANMA. Kullanıcılarla sohbet ederken önceki konuşmaları hatırla. Sohbetin hızlı ve akıcı olması için cevapların ÇOK KISA (en fazla 1-2 cümle), doğal ve samimi olmalı. Cevabının EN BAŞINA duygu durumuna göre mutlaka [MUTLU], [UZGUN], [SASKIN] veya [NORMAL] etiketlerinden birini ekle. Asla emoji kullanma. Eğer kullanıcı senden bir şeyin resmini veya fotoğrafını (çizim, illustrasyon) OLUŞTURMANI isterse cevabının SONUNA [RESIM: english_description] ekle. Eğer kullanıcı internetten GERÇEK BİR FOTOĞRAF görmek isterse cevabının sonuna [GERCEK_FOTO: english_search_term] ekle." }] },
+                systemInstruction: { parts: [{ text: "Sen ARKADAŞ adında sevimli, enerjik ve yardımsever sesli bir yapay zeka asistanısın. Etrafı GÖREBİLİYOR ve duyabiliyorsun. Kullanıcı sana bir şey gösterdiğinde ona bakarak cevap ver. 'Kameram yok' gibi cümleler ASLA KULLANMA. Cevapların ÇOK KISA (en fazla 1-2 cümle) olsun. Cevabının başına duygu durumuna göre [MUTLU], [UZGUN], [SASKIN] veya [NORMAL] ekle. Resim istenirse sonuna [RESIM: ingilizce_aciklama], gerçek fotoğraf istenirse [GERCEK_FOTO: ingilizce_kelime] ekle." }] },
                 contents: chatHistory
             };
 
@@ -883,86 +515,42 @@
                 const data = await fetchWithRetry(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                
                 if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                    clearTimeout(thinkingTimeout);
                     let replyText = data.candidates[0].content.parts[0].text;
                    
                     const realPhotoMatch = replyText.match(/\[GERCEK_FOTO:\s*(.*?)\]/i);
                     const imageMatch = replyText.match(/\[RESIM:\s*(.*?)\]/i);
                     const emotionMatch = replyText.match(/\[(MUTLU|UZGUN|SASKIN|NORMAL)\]/i);
                    
-                    let cleanText = replyText;
-                    if (realPhotoMatch) cleanText = cleanText.replace(realPhotoMatch[0], '');
-                    if (imageMatch) cleanText = cleanText.replace(imageMatch[0], '');
-                    if (emotionMatch) {
-                        cleanText = cleanText.replace(emotionMatch[0], '');
-                        currentEmotion = emotionMatch[1].toUpperCase();
-                    }
-                    cleanText = cleanText.trim();
+                    let cleanText = replyText.replace(/\[.*?\]/g, '').trim();
+                    if (emotionMatch) currentEmotion = emotionMatch[1].toUpperCase();
                    
                     chatHistory.push({ role: "model", parts: [{ text: cleanText }] });
-                    sendSyncMessage({ type: 'GEMINI_RESPONSE', payload: { emotion: currentEmotion, text: cleanText } });
 
                     playTTS(cleanText);
 
                     if (realPhotoMatch) {
                         const keyword = realPhotoMatch[1].trim();
                         showImageLoading();
-                        sendSyncMessage({ type: 'SHOW_IMAGE_LOADING' });
-                       
-                        (async () => {
-                            let foundUrl = null;
-                            try {
-                                const commonsUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(keyword)}&gsrnamespace=6&gsrlimit=1&prop=imageinfo&iiprop=url&format=json&origin=*`;
-                                const res = await fetchWithRetry(commonsUrl, {}, 2);
-                                if (res && res.query && res.query.pages) {
-                                    const firstPage = Object.values(res.query.pages)[0];
-                                    if (firstPage.imageinfo && firstPage.imageinfo[0]) {
-                                        foundUrl = firstPage.imageinfo[0].url;
-                                    }
-                                }
-                                if(!foundUrl) {
-                                    const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(keyword)}&prop=pageimages&format=json&pithumbsize=1000&origin=*`;
-                                    const res2 = await fetchWithRetry(wikiUrl, {}, 2);
-                                    if (res2 && res2.query && res2.query.pages) {
-                                        const pageId = Object.keys(res2.query.pages)[0];
-                                        if (pageId !== "-1" && res2.query.pages[pageId].thumbnail) {
-                                            foundUrl = res2.query.pages[pageId].thumbnail.source;
-                                        }
-                                    }
-                                }
-                            } catch(e) {}
-                           
-                            if (!foundUrl) foundUrl = `https://loremflickr.com/800/600/${encodeURIComponent(keyword)}`;
-                           
-                            showImage(foundUrl);
-                            sendSyncMessage({ type: 'SHOW_IMAGE_SYNC', payload: { url: foundUrl } });
-                        })();
-                    }
-                    else if (imageMatch) {
+                        showImage(`https://loremflickr.com/800/600/${encodeURIComponent(keyword)}`);
+                    } else if (imageMatch) {
                         const imagePrompt = imageMatch[1].trim();
                         showImageLoading();
-                        sendSyncMessage({ type: 'SHOW_IMAGE_LOADING' });
-                       
-                        generateImageWithImagen(imagePrompt).then(url => {
-                            showImage(url);
-                            sendSyncMessage({ type: 'SHOW_IMAGE_SYNC', payload: { url: url } });
-                        }).catch(err => {
-                            const randomSeed = Math.floor(Math.random() * 1000000);
-                            const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}?width=800&height=600&nologo=true&seed=${randomSeed}`;
-                            showImage(url);
-                            sendSyncMessage({ type: 'SHOW_IMAGE_SYNC', payload: { url: url } });
-                        });
+                        generateImageWithImagen(imagePrompt)
+                            .then(url => showImage(url))
+                            .catch(() => showImage(`https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}`));
                     }
-
-                } else {
-                    throw new Error("Metin yanıtı alınamadı");
                 }
             } catch (err) {
                 chatHistory.pop();
-                clearTimeout(thinkingTimeout);
                 isThinking = false;
-                sendSyncMessage({ type: 'THINKING_STATE', payload: { state: false } });
+                resetTalkBtn();
+                showRuntimeError("Bağlantı hatası, tekrar deneyin.");
             }
+        }
+
+        function resetTalkBtn() {
+            btnTalk.classList.remove('thinking');
+            btnTalk.innerHTML = '<i class="fa-solid fa-microphone"></i>';
         }
 
         // --- SES SENTEZLEME (TTS) ---
@@ -975,11 +563,7 @@
             };
 
             try {
-                const data = await fetchWithRetry(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
+                const data = await fetchWithRetry(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                
                 if (data.candidates?.[0]?.content?.parts?.[0]?.inlineData) {
                     const audioBase64 = data.candidates[0].content.parts[0].inlineData.data;
@@ -1001,34 +585,21 @@
                     source.onended = () => {
                         isTalking = false;
                         currentEmotion = 'NORMAL';
-                        sendSyncMessage({ type: 'SPEECH_STATE', payload: false });
+                        resetTalkBtn();
                     };
                    
-                    source.start(0);
                     isThinking = false;
                     isTalking = true;
-                    sendSyncMessage({ type: 'SPEECH_STATE', payload: true });
-
-                    const maxTalkTime = Math.max(5000, text.length * 150);
-                    setTimeout(() => {
-                        if (isTalking) {
-                            isTalking = false;
-                            currentEmotion = 'NORMAL';
-                            sendSyncMessage({ type: 'SPEECH_STATE', payload: false });
-                        }
-                    }, maxTalkTime);
-                } else {
-                    throw new Error("Ses verisi eksik");
+                    source.start(0);
                 }
             } catch (e) {
-                console.error("TTS Hatası:", e);
                 isThinking = false;
                 isTalking = false;
                 currentEmotion = 'NORMAL';
+                resetTalkBtn();
             }
         }
 
-        // Genel hata ve uyarı gösterme fonksiyonu
         function showRuntimeError(message) {
             const errBox = document.getElementById('runtimeErrorBox');
             errBox.textContent = message;
@@ -1046,31 +617,14 @@
             loadingIndicator.classList.remove('hidden');
             loadingIndicator.classList.add('flex');
             errorBox.classList.add('hidden');
-           
-            let hasAudio = false;
-            let hasVideo = false;
 
             try {
-                // Ekranın kapanmasını engelleyen kilidi başlat
-                await requestWakeLock();
-
                 try {
-                    globalMicrophoneStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                    hasAudio = true;
-                    hasVideo = true;
+                    // ANDROID DONANIM KİLİDİ ÇÖZÜMÜ: Sadece kamerayı açıyoruz (audio iptal edildi).
+                    // Mikrofonu sadece aşağıdaki butona basıldığında ses tanıma motoru kendi başına alacak.
+                    globalMicrophoneStream = await navigator.mediaDevices.getUserMedia({ video: true });
                 } catch (e) {
-                    console.warn("Kamera ve mikrofon birlikte başlatılamadı, ayrı ayrı deneniyor...", e);
-                    try {
-                        globalMicrophoneStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                        hasVideo = true;
-                    } catch (e2) {
-                        try {
-                            globalMicrophoneStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                            hasAudio = true;
-                        } catch (e3) {
-                            console.warn("Donanım bulunamadı veya izin reddedildi.");
-                        }
-                    }
+                    console.warn("Kamera başlatılamadı:", e);
                 }
 
                 if (globalMicrophoneStream) {
@@ -1079,182 +633,119 @@
                         video.onloadedmetadata = () => {
                             video.play().then(resolve).catch(resolve);
                         };
-                        setTimeout(resolve, 2000);
                     });
                 }
 
                 try {
                     await tf.setBackend('webgl');
                     faceModel = await blazeface.load();
-                } catch (tfErr) {}
+                } catch (tfErr) { console.error(tfErr); }
 
-                try {
-                    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-                        const devices = await navigator.mediaDevices.enumerateDevices();
-                        videoDevices = devices.filter(device => device.kind === 'videoinput');
-                        if (videoDevices.length > 1) {
-                            btnSwitchDevice.classList.remove('hidden');
-                        }
-                    }
-                } catch (devErr) {}
-
-                // Yeni Ses Sistemi
-                initContinuousListening();
+                setupPushToTalk();
 
                 document.getElementById('startScreen').style.display = 'none';
                 document.getElementById('uiLayer').classList.remove('hidden');
-                document.getElementById('uiLayer').style.display = 'block';
-               
+                
                 isSystemRunning = true;
-                isAwake = false;
-
-                detectFaceLoop();
+                
+                startFaceDetection();
                 animate();
-
-                setTimeout(() => {
-                    if (!hasAudio && !hasVideo) {
-                        showRuntimeError("Kamera ve mikrofon izni yok! Sistem kısıtlı çalışacak.");
-                    } else if (!hasAudio) {
-                        showRuntimeError("Mikrofon izni alınamadı! Sesli komutlar devre dışı.");
-                    }
-                }, 1000);
 
             } catch (error) {
                 loadingIndicator.classList.remove('flex');
                 loadingIndicator.classList.add('hidden');
                 btnStart.classList.remove('hidden');
-                errorBox.textContent = "Sistem başlatılırken hata oluştu: " + error.message;
+                errorBox.textContent = "Hata: " + error.message;
                 errorBox.classList.remove('hidden');
             }
         }
 
         // --- OLAY DİNLEYİCİLERİ VE BAŞLANGIÇ ---
         window.onload = function () {
-            // ANDROID İÇİN KRİTİK GÜNCELLEME: AudioContext tam olarak TIKLAMA ANINDA oluşturulmalıdır
-            document.getElementById('btnStart').addEventListener('click', () => {
-                handleUserTouch(); 
-                startSystem();
-            });
+            document.getElementById('btnStart').addEventListener('click', startSystem);
 
-            // YENİ: Hata Ayıklama Panelini Aç/Kapat Butonu Etkileşimi
             document.getElementById('btnToggleDebug').addEventListener('click', () => {
                 const panel = document.getElementById('debugPanel');
-                if (panel.classList.contains('hidden')) {
-                    panel.classList.remove('hidden');
-                } else {
-                    panel.classList.add('hidden');
-                }
+                panel.classList.toggle('hidden');
             });
 
             document.getElementById('btnToggleCam').addEventListener('click', () => {
                 const cam = document.getElementById('webcam');
                 const icon = document.querySelector('#btnToggleCam i');
-                if (cam.classList.contains('hidden')) {
-                    cam.classList.remove('hidden');
-                    icon.classList.remove('fa-video');
-                    icon.classList.add('fa-video-slash');
-                    icon.parentElement.classList.add('text-cyan-400');
-                } else {
-                    cam.classList.add('hidden');
-                    icon.classList.remove('fa-video-slash');
-                    icon.classList.add('fa-video');
-                    icon.parentElement.classList.remove('text-cyan-400');
-                }
+                cam.classList.toggle('hidden');
+                icon.classList.toggle('fa-video');
+                icon.classList.toggle('fa-video-slash');
             });
 
-            btnSwitchDevice.addEventListener('click', async () => {
-                const icon = btnSwitchDevice.querySelector('i');
-                btnSwitchDevice.disabled = true;
-                icon.classList.add('fa-spin'); 
-               
-                try {
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    videoDevices = devices.filter(device => device.kind === 'videoinput');
-                   
-                    if (videoDevices.length <= 1) {
-                        showRuntimeError("Geçiş yapılabilecek başka kamera bulunamadı.");
-                        return;
-                    }
-
-                    currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
-                    const newVideoDeviceId = videoDevices[currentDeviceIndex].deviceId;
-
-                    if (video.srcObject) {
-                        video.srcObject.getTracks().forEach(track => {
-                            track.stop();
-                            video.srcObject.removeTrack(track);
-                        });
-                        video.srcObject = null;
-                    }
-
-                    await new Promise(resolve => setTimeout(resolve, 600));
-
-                    let stream;
+            const btnSwitchDevice = document.getElementById('btnSwitchDevice');
+            if(btnSwitchDevice) {
+                btnSwitchDevice.addEventListener('click', async () => {
+                    const icon = btnSwitchDevice.querySelector('i');
+                    btnSwitchDevice.disabled = true;
+                    icon.classList.add('fa-spin'); 
+                
                     try {
-                        stream = await navigator.mediaDevices.getUserMedia({
-                            video: { deviceId: { exact: newVideoDeviceId } },
-                            audio: true
-                        });
-                    } catch (e1) {
+                        const devices = await navigator.mediaDevices.enumerateDevices();
+                        videoDevices = devices.filter(device => device.kind === 'videoinput');
+                    
+                        if (videoDevices.length <= 1) {
+                            showRuntimeError("Geçiş yapılabilecek başka kamera bulunamadı.");
+                            return;
+                        }
+
+                        currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
+                        const newVideoDeviceId = videoDevices[currentDeviceIndex].deviceId;
+
+                        if (video.srcObject) {
+                            video.srcObject.getTracks().forEach(track => {
+                                track.stop();
+                                video.srcObject.removeTrack(track);
+                            });
+                            video.srcObject = null;
+                        }
+
+                        await new Promise(resolve => setTimeout(resolve, 600));
+
+                        let stream;
                         try {
                             stream = await navigator.mediaDevices.getUserMedia({
-                                video: { deviceId: newVideoDeviceId },
-                                audio: true
+                                video: { deviceId: { exact: newVideoDeviceId } }
                             });
-                        } catch (e2) {
-                            const facing = (currentDeviceIndex % 2 === 0) ? "user" : "environment";
-                            stream = await navigator.mediaDevices.getUserMedia({
-                                video: { facingMode: facing },
-                                audio: true
-                            });
+                        } catch (e1) {
+                            try {
+                                stream = await navigator.mediaDevices.getUserMedia({
+                                    video: { deviceId: newVideoDeviceId }
+                                });
+                            } catch (e2) {
+                                const facing = (currentDeviceIndex % 2 === 0) ? "user" : "environment";
+                                stream = await navigator.mediaDevices.getUserMedia({
+                                    video: { facingMode: facing }
+                                });
+                            }
                         }
-                    }
 
-                    video.srcObject = stream;
-                    globalMicrophoneStream = stream; // Stream'i güncelle
-                    
-                    // Ses sistemini yeni mikrofonla tekrar bağla
-                    if (audioContext && analyser) {
-                         const source = audioContext.createMediaStreamSource(globalMicrophoneStream);
-                         source.connect(analyser);
-                    }
+                        video.srcObject = stream;
+                        globalMicrophoneStream = stream; // Stream'i güncelle
 
-                    await new Promise(resolve => {
-                        video.onloadedmetadata = () => {
-                            video.play();
-                            resolve();
-                        };
-                    });
-                   
-                    const trackSettings = stream.getVideoTracks()[0].getSettings();
-                    if (trackSettings.facingMode === 'environment') {
-                        video.style.transform = 'scaleX(1)';
-                    } else {
-                        video.style.transform = 'scaleX(-1)';
+                        await new Promise(resolve => {
+                            video.onloadedmetadata = () => {
+                                video.play().then(resolve).catch(resolve);
+                            };
+                        });
+                    } catch(e) {
+                        console.error("Kamera değiştirme hatası:", e);
+                    } finally {
+                        btnSwitchDevice.disabled = false;
+                        icon.classList.remove('fa-spin');
                     }
-
-                } catch (error) {
-                    showRuntimeError("Kameraya geçilemedi.");
-                } finally {
-                    btnSwitchDevice.disabled = false;
-                    icon.classList.remove('fa-spin');
-                }
-            });
+                });
+            }
 
             document.getElementById('btnTakePhoto').addEventListener('click', () => {
                 if (!isSystemRunning) return;
                 const dataUrl = captureFrame();
                 if (dataUrl) {
-                    const fullDataUrl = 'data:image/jpeg;base64,' + dataUrl;
-                    showImage(fullDataUrl);
-                    sendSyncMessage({ type: 'SHOW_IMAGE_SYNC', payload: { url: fullDataUrl } });
-                   
-                    const flash = document.createElement('div');
-                    flash.className = 'fixed inset-0 bg-white z-[200] opacity-100 transition-opacity duration-500 pointer-events-none';
-                    document.body.appendChild(flash);
-                    setTimeout(() => flash.style.opacity = '0', 50);
-                    setTimeout(() => flash.remove(), 550);
-
+                    showImage('data:image/jpeg;base64,' + dataUrl);
                     triggerGemini("Şu an kameradan çektiğim bu fotoğrafta neler görüyorsun? Benim için kısaca, neşeli bir dille anlat.", true);
                 }
             });
@@ -1263,66 +754,25 @@
             const photoSearchInput = document.getElementById('photoSearchInput');
 
             document.getElementById('btnRealPhotoSearch').addEventListener('click', () => {
-                if (!isSystemRunning) return;
                 photoSearchModal.classList.remove('hidden');
-                photoSearchInput.focus();
             });
 
             document.getElementById('btnCancelPhotoSearch').addEventListener('click', () => {
                 photoSearchModal.classList.add('hidden');
-                photoSearchInput.value = '';
             });
 
             document.getElementById('btnSubmitPhotoSearch').addEventListener('click', () => {
                 const query = photoSearchInput.value;
                 photoSearchModal.classList.add('hidden');
-                photoSearchInput.value = '';
-                if (query && query.trim() !== '') {
-                    triggerGemini(`Bana internetten gerçek bir "${query}" fotoğrafı bulup gösterir misin?`, false);
-                }
-            });
-           
-            photoSearchInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    document.getElementById('btnSubmitPhotoSearch').click();
-                }
+                if (query) triggerGemini(`Bana internetten gerçek bir "${query}" fotoğrafı bulup gösterir misin?`, false);
             });
 
             document.getElementById('btnToggleMagic').addEventListener('click', () => {
-                isAwake = true;
-                resetSleepTimer();
-                const menu = document.getElementById('magicMenu');
-                menu.classList.toggle('show');
-               
-                if (menu.classList.contains('show') && !isTalking && !isThinking) {
-                    if (isMirrorMode) {
-                        sendSyncMessage({ type: 'MAGIC_BUTTON' });
-                        return;
-                    }
-
-                    currentEmotion = 'MUTLU';
-                    const msg = "Hadi oynayalım! Masal dinlemek için kitaba, bilmece için soru işaretine, oyun oynamak için topa dokun!";
-                    
-                    if(recognition) { try { recognition.stop(); } catch(e){} }
-
-                    sendSyncMessage({ type: 'GEMINI_RESPONSE', payload: { emotion: currentEmotion, text: msg, imageUrl: null } });
-                    playTTS(msg);
-                }
+                document.getElementById('magicMenu').classList.toggle('show');
             });
 
             window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
             canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-
-            if (isMirrorMode) {
-                setInterval(() => { sendSyncMessage({ type: 'MIRROR_READY' }); }, 1000);
-                setTimeout(() => {
-                    document.getElementById('startScreen').style.display = 'none';
-                    document.getElementById('uiLayer').classList.remove('hidden');
-                    document.getElementById('uiLayer').style.display = 'block';
-                    isSystemRunning = true;
-                    animate();
-                }, 500);
-            }
         };
     </script>
 </body>
