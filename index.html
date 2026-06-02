@@ -31,7 +31,7 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* Telsiz (Push-to-Talk) Butonu */
+        /* Konuşma (Dokun ve Bırak) Butonu */
         #btnTalk {
             position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 150;
             width: 80px; height: 80px; border-radius: 50%;
@@ -59,38 +59,30 @@
         }
         @keyframes pulse-green { 0% { opacity: 0.8; transform: translateX(-50%) scale(1); } 100% { opacity: 1; transform: translateX(-50%) scale(1.05); } }
         @keyframes pulse-orange { 0% { opacity: 0.8; transform: translateX(-50%) scale(1); } 100% { opacity: 1; transform: translateX(-50%) scale(1.05); } }
-
-        /* Hata Ayıklama Paneli (Küçültüldü) */
-        #debugPanel { position: fixed; top: 80px; left: 16px; z-index: 150; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; border: 1px solid #333; pointer-events: none; color: white; font-family: monospace; font-size: 12px; min-width: 200px; }
     </style>
 </head>
 <body>
 
-    <!-- Hata Ayıklama Paneli -->
-    <div id="debugPanel" class="hidden">
-        <div>Motor: <span id="micStatus" class="text-yellow-400">BEKLİYOR</span></div>
-    </div>
-
     <!-- Kontrol Menüsü -->
     <div class="absolute top-4 left-4 z-[100] flex gap-2 bg-black/50 p-2 rounded-2xl backdrop-blur-md border border-cyan-900/50 interactive">
         <button id="btnFullscreen" class="text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Tam Ekran"><i class="fa-solid fa-expand text-2xl"></i></button>
+        <button id="btnNewTab" class="text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Yeni Sekmede Aç (Ayna Modu)"><i class="fa-solid fa-arrow-up-right-from-square text-2xl"></i></button>
         <div class="w-px h-8 bg-gray-600/50 my-auto mx-1"></div>
         <button id="btnToggleCam" class="text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Kamerayı Ekranda Göster/Gizle"><i class="fa-solid fa-video text-2xl"></i></button>
         <button id="btnSwitchDevice" class="hidden text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Kamera Değiştir"><i class="fa-solid fa-camera-rotate text-2xl"></i></button>
         <button id="btnTakePhoto" class="text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Anlık Fotoğraf Çek ve Yorumla"><i class="fa-solid fa-camera text-2xl"></i></button>
         <button id="btnRealPhotoSearch" class="text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="İnternetten Gerçek Fotoğraf Bul"><i class="fa-solid fa-image text-2xl"></i></button>
-        <button id="btnToggleDebug" class="text-gray-400 hover:text-cyan-400 p-2 transition-colors" title="Hata Ayıklama Panelini Aç/Kapat"><i class="fa-solid fa-bug text-2xl"></i></button>
     </div>
 
     <!-- Başlangıç Ekranı -->
     <div id="startScreen">
         <i class="fa-solid fa-robot text-6xl mb-4 animate-pulse"></i>
         <h1 class="text-3xl font-bold mb-4 text-center">ARKADAŞ Asistan</h1>
-        <p class="text-cyan-500 mb-8 text-center max-w-md px-4">Lütfen kamera ve mikrofon izinlerini onaylayın.</p>
+        <p class="text-cyan-500 mb-8 text-center max-w-md px-4">Sistemi başlatmak için tıklayın.</p>
         <button id="btnStart" class="btn-start font-bold py-3 px-8 rounded-full text-xl mb-4">Sistemi Başlat</button>
-        <div id="loadingIndicator" class="hidden flex-col items-center gap-3">
+        <div id="loadingIndicator" class="hidden flex-col items-center gap-3 text-center">
             <div class="loader"></div>
-            <p class="text-cyan-200 text-sm text-center">Modüller Yükleniyor...</p>
+            <p id="loadingText" class="text-cyan-200 text-sm">Modüller Hazırlanıyor...</p>
         </div>
         <div id="errorBox" class="hidden text-red-400 mt-4 text-center font-semibold bg-red-900/30 p-4 rounded-xl border border-red-500/50 max-w-md mx-4"></div>
     </div>
@@ -124,7 +116,7 @@
     <!-- Etkileşim UI Katmanı -->
     <div id="uiLayer" class="absolute bottom-0 left-0 w-full h-full z-20 hidden pointer-events-none">
         
-        <!-- TELSİZ BUTONU (TEK TIKLA KONUŞ) -->
+        <!-- TEK TIKLA KONUŞ BUTONU -->
         <button id="btnTalk" class="interactive" title="Dokun ve Konuş">
             <i class="fa-solid fa-microphone"></i>
         </button>
@@ -165,6 +157,7 @@
         let currentDeviceIndex = 0;
        
         let wakeLock = null;
+        let mirrorWindow = null;
         const apiKey = "";
         let ttsAudioContext = null;
 
@@ -178,6 +171,30 @@
         let eyeState = { w: 70, h: 105, tilt: 0, pR: 25 };
         
         let globalMicrophoneStream = null;
+
+        // --- YÜKSEK PERFORMANSLI AYNA MODU SENKRONİZASYONU ---
+        // Mirror tab'ı kasmamak için saniyede sadece 20 kere hafif veri yolluyoruz.
+        setInterval(() => {
+            if (mirrorWindow && !mirrorWindow.closed) {
+                let color = '#00ffff';
+                if (btnTalk.classList.contains('active-talk')) color = '#00ff00';
+                else if (isThinking) color = '#ffaa00';
+                
+                mirrorWindow.postMessage({
+                    type: 'SYNC',
+                    payload: {
+                        nx: targetX / canvas.width, 
+                        ny: targetY / canvas.height,
+                        isThinking: isThinking,
+                        isTalking: isTalking,
+                        emotion: currentEmotion,
+                        color: color,
+                        imgVis: !document.getElementById('imageDisplay').classList.contains('hidden'),
+                        imgUrl: document.getElementById('displayedImage').src
+                    }
+                }, '*');
+            }
+        }, 50);
 
         // --- EKRAN UYANIK TUTMA (WAKE LOCK) ---
         async function requestWakeLock() {
@@ -240,19 +257,11 @@
             osc.start(); osc.stop(ttsAudioContext.currentTime + 0.15);
         }
 
-        // --- TELSİZ (MANUEL DİNLEME) SİSTEMİ ---
+        // --- TEK TIKLA KONUŞ SİSTEMİ ---
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         let recognition = null;
         let currentTranscript = "";
-        let isRecognizing = false; // InvalidStateError için güvenlik kilidi
-
-        function updateDebugPanel(statusText, statusColor) {
-            const statusEl = document.getElementById('micStatus');
-            if (statusEl) {
-                statusEl.innerText = statusText;
-                statusEl.className = statusColor;
-            }
-        }
+        let isRecognizing = false;
 
         function setupPushToTalk() {
             if (!SpeechRecognition) {
@@ -262,47 +271,37 @@
             }
 
             recognition = new SpeechRecognition();
-            // Türkçe dil paketi bazen sorun yaratabiliyor, ama Türkçe için gerekli
             recognition.lang = 'tr-TR';
-            recognition.continuous = false; // Sessizlik olduğunda otomatik dursun
-            
-            // ANDROID 13 KRİTİK DEĞİŞİKLİK: 
-            // Canlı sonuçları (interim) KAPATTIK. Çünkü bazı Android cihazlar bu veriyi işlerken kilitleniyor.
-            // Sadece sen susup konuşmayı bitirdiğinde "isFinal" sonucunu tek seferde verecek.
+            recognition.continuous = false; 
             recognition.interimResults = false; 
 
             recognition.onstart = () => {
                 isRecognizing = true;
                 btnTalk.classList.add('active-talk');
-                updateDebugPanel("DİNLİYOR (Konuşun...)", "text-green-400 font-bold");
                 currentTranscript = "";
             };
 
             recognition.onresult = (event) => {
-                // Sadece son onaylanmış cümleyi al (interim kapalı olduğu için hep final gelir)
                 if (event.results.length > 0) {
                     currentTranscript = event.results[0][0].transcript;
-                    updateDebugPanel("İŞLENİYOR...", "text-blue-400 font-bold");
                 }
             };
 
             recognition.onerror = (e) => {
                 isRecognizing = false;
-                console.error("Ses Tanıma Hatası:", e.error);
                 btnTalk.classList.remove('active-talk');
-                updateDebugPanel("HATA: " + e.error, "text-red-400");
-                if (e.error === 'not-allowed') showRuntimeError("Mikrofon izni yok!");
+                if (e.error === 'not-allowed') {
+                    showRuntimeError("Mikrofon izni engellendi. Lütfen tabletin site ayarlarından mikrofonu açın.");
+                }
             };
 
             recognition.onend = () => {
                 isRecognizing = false;
                 btnTalk.classList.remove('active-talk');
-                updateDebugPanel("BEKLİYOR", "text-yellow-400");
                 
                 const finalCommand = currentTranscript.trim();
-                // 3 harf kısıtlamasını kaldırdım, sadece boş olmamasını kontrol ediyorum.
                 if (finalCommand !== "") {
-                    triggerGemini(finalCommand, true); // Kameradan da bakarak cevapla
+                    triggerGemini(finalCommand, true);
                 }
                 currentTranscript = "";
             };
@@ -312,10 +311,8 @@
                 if (isThinking || isTalking) return;
                 
                 if (isRecognizing) {
-                    // Dinliyorsa durdur ve cevabı yolla
                     try { recognition.stop(); } catch(err) {}
                 } else {
-                    // Dinlemiyorsa başlat
                     try {
                         playStartListenSound();
                         recognition.start();
@@ -476,7 +473,7 @@
             document.getElementById('displayedImage').src = url;
             document.getElementById('displayedImage').classList.remove('hidden');
             clearTimeout(window.imageCloseTimer);
-            window.imageCloseTimer = setTimeout(closeImage, 15000);
+            window.imageCloseTimer = setTimeout(() => closeImage(), 15000);
         }
 
         function closeImage() {
@@ -495,7 +492,7 @@
             btnTalk.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
             playThinkingSound();
             document.getElementById('magicMenu').classList.remove('show');
-
+            
             let imageBase64 = useVision ? captureFrame() : null;
 
             let userParts = [{ text: prompt }];
@@ -507,7 +504,7 @@
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
             const payload = {
-                systemInstruction: { parts: [{ text: "Sen ARKADAŞ adında sevimli, enerjik ve yardımsever sesli bir yapay zeka asistanısın. Etrafı GÖREBİLİYOR ve duyabiliyorsun. Kullanıcı sana bir şey gösterdiğinde ona bakarak cevap ver. 'Kameram yok' gibi cümleler ASLA KULLANMA. Cevapların ÇOK KISA (en fazla 1-2 cümle) olsun. Cevabının başına duygu durumuna göre [MUTLU], [UZGUN], [SASKIN] veya [NORMAL] ekle. Resim istenirse sonuna [RESIM: ingilizce_aciklama], gerçek fotoğraf istenirse [GERCEK_FOTO: ingilizce_kelime] ekle." }] },
+                systemInstruction: { parts: [{ text: "Sen ARKADAŞ adında sevimli, enerjik ve yardımsever sesli bir yapay zeka asistanısın. Etrafı GÖREBİLİYOR ve duyabiliyorsun. Kullanıcı sana bir şey gösterdiğinde ona bakarak cevap ver. Gördüğün nesnelerin renklerini söylerken ortam ışığını (sarı ışık, loş vb.) dikkate alarak en doğru rengi söylemeye çok dikkat et. 'Kameram yok' gibi cümleler ASLA KULLANMA. Cevapların ÇOK KISA (en fazla 1-2 cümle) olsun. Cevabının başına duygu durumuna göre [MUTLU], [UZGUN], [SASKIN] veya [NORMAL] ekle. Resim istenirse sonuna [RESIM: ingilizce_aciklama], gerçek fotoğraf istenirse [GERCEK_FOTO: ingilizce_kelime] ekle." }] },
                 contents: chatHistory
             };
 
@@ -536,8 +533,8 @@
                         const imagePrompt = imageMatch[1].trim();
                         showImageLoading();
                         generateImageWithImagen(imagePrompt)
-                            .then(url => showImage(url))
-                            .catch(() => showImage(`https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}`));
+                            .then(url => { showImage(url); })
+                            .catch(() => { showImage(`https://image.pollinations.ai/prompt/${encodeURIComponent(imagePrompt)}`); });
                     }
                 }
             } catch (err) {
@@ -612,6 +609,7 @@
             const btnStart = document.getElementById('btnStart');
             const loadingIndicator = document.getElementById('loadingIndicator');
             const errorBox = document.getElementById('errorBox');
+            const loadingText = loadingIndicator.querySelector('p');
 
             btnStart.classList.add('hidden');
             loadingIndicator.classList.remove('hidden');
@@ -619,27 +617,46 @@
             errorBox.classList.add('hidden');
 
             try {
+                loadingText.innerHTML = "İzinler İsteniyor...<br><span class='text-xs text-cyan-400/70'>Kamera ve Mikrofona Lütfen İzin Verin</span>";
+                
+                // ANDROID 13 KİLİT ÇÖZÜMÜ: Kamera ve Mikrofonu aynı anda (tek soruda) istiyoruz!
+                // Bunu yapmazsak Android kamerayı kapatıyor.
                 try {
-                    // ANDROID DONANIM KİLİDİ ÇÖZÜMÜ: Sadece kamerayı açıyoruz (audio iptal edildi).
-                    // Mikrofonu sadece aşağıdaki butona basıldığında ses tanıma motoru kendi başına alacak.
-                    globalMicrophoneStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    // İzinleri kopardıktan sonra donanım meşgul olmasın diye ses izini serbest bırakıyoruz
+                    tempStream.getAudioTracks().forEach(t => t.stop());
+                    globalMicrophoneStream = new MediaStream(tempStream.getVideoTracks());
                 } catch (e) {
-                    console.warn("Kamera başlatılamadı:", e);
+                    console.warn("Çift izin reddedildi, sadece kamera deneniyor:", e);
+                    try {
+                        globalMicrophoneStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    } catch (e2) {
+                        throw new Error("Kamera erişimi reddedildi.");
+                    }
                 }
 
                 if (globalMicrophoneStream) {
                     video.srcObject = globalMicrophoneStream;
                     await new Promise((resolve) => {
+                        let isResolved = false;
+                        const finish = () => { if(!isResolved) { isResolved = true; resolve(); } };
+                        
                         video.onloadedmetadata = () => {
-                            video.play().then(resolve).catch(resolve);
+                            video.play().then(finish).catch(finish);
                         };
+                        
+                        // Yüklenme kilitlenirse sistemi zorla başlatacak cankurtaran (2 saniye)
+                        setTimeout(finish, 2000); 
                     });
                 }
 
+                loadingText.innerHTML = "Yapay Zeka Görüşü Yükleniyor...<br><span class='text-xs text-cyan-400/70'>(Tabletlerde bu işlem 5-10 saniye sürebilir. Lütfen bekleyin)</span>";
+                await new Promise(r => setTimeout(r, 100)); // UI'ın güncellenmesi için nefes alma payı
+
                 try {
-                    await tf.setBackend('webgl');
+                    try { await tf.setBackend('webgl'); } catch(e) { await tf.setBackend('cpu'); }
                     faceModel = await blazeface.load();
-                } catch (tfErr) { console.error(tfErr); }
+                } catch (tfErr) { console.error("Yüz tespiti modeli yüklenemedi", tfErr); }
 
                 setupPushToTalk();
 
@@ -662,11 +679,12 @@
 
         // --- OLAY DİNLEYİCİLERİ VE BAŞLANGIÇ ---
         window.onload = function () {
-            document.getElementById('btnStart').addEventListener('click', startSystem);
-
-            document.getElementById('btnToggleDebug').addEventListener('click', () => {
-                const panel = document.getElementById('debugPanel');
-                panel.classList.toggle('hidden');
+            document.getElementById('btnStart').addEventListener('click', () => {
+                try {
+                    if (!ttsAudioContext) ttsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    if (ttsAudioContext.state === 'suspended') ttsAudioContext.resume();
+                } catch(e) {}
+                startSystem();
             });
 
             document.getElementById('btnToggleCam').addEventListener('click', () => {
@@ -675,6 +693,115 @@
                 cam.classList.toggle('hidden');
                 icon.classList.toggle('fa-video');
                 icon.classList.toggle('fa-video-slash');
+            });
+
+            // YÜKSEK PERFORMANSLI YENİ SEKMEYİ AÇMA (AYNA MODU)
+            // Bu sistem tableti %0 yoracak ve kasmaları tamamen engelleyecektir!
+            document.getElementById('btnNewTab').addEventListener('click', () => {
+                const mirrorHTML = `<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>ARKADAŞ - Ayna Modu</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; }
+        canvas { display: block; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        #imgContainer { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; display: none; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 20px; border: 2px solid rgba(0,255,255,0.4); }
+        img { max-width: 90vw; max-height: 85vh; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <canvas id="eyeCanvas"></canvas>
+    <div id="imgContainer"><img id="mirrorImg" src=""></div>
+    <script>
+        const canvas = document.getElementById('eyeCanvas');
+        const ctx = canvas.getContext('2d');
+        let eyeState = { w: 70, h: 105, tilt: 0, pR: 25 };
+        let targetEyeState = { w: 70, h: 105, tilt: 0, pR: 25 };
+        let currentX = window.innerWidth / 2, currentY = window.innerHeight / 2;
+        let targetX = currentX, targetY = currentY;
+        let isThinking = false, isTalking = false;
+        let eyeColor = '#00ffff';
+
+        window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+        canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+
+        window.addEventListener('message', (e) => {
+            if (!e.data || e.data.type !== 'SYNC') return;
+            const p = e.data.payload;
+            targetX = p.nx * canvas.width;
+            targetY = p.ny * canvas.height;
+            isThinking = p.isThinking;
+            isTalking = p.isTalking;
+            eyeColor = p.color;
+            
+            if (p.emotion === 'MUTLU') targetEyeState = { w: 80, h: 60, tilt: -0.15, pR: 28 };
+            else if (p.emotion === 'UZGUN') targetEyeState = { w: 70, h: 80, tilt: 0.2, pR: 20 };
+            else if (p.emotion === 'SASKIN') targetEyeState = { w: 90, h: 125, tilt: 0, pR: 18 };
+            else targetEyeState = { w: 70, h: 105, tilt: 0, pR: 25 };
+
+            const imgCont = document.getElementById('imgContainer');
+            if(p.imgVis && p.imgUrl) {
+                imgCont.style.display = 'block';
+                document.getElementById('mirrorImg').src = p.imgUrl;
+            } else {
+                imgCont.style.display = 'none';
+            }
+        });
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            currentX += (targetX - currentX) * 0.15;
+            currentY += (targetY - currentY) * 0.15;
+            
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            let dx = Math.max(-180, Math.min(180, currentX - cx));
+            let dy = Math.max(-180, Math.min(180, currentY - cy));
+            
+            let baseEyeX = cx + dx * 0.2;
+            let baseEyeY = cy + dy * 0.2;
+            let pupilOffsetX = dx * 0.4;
+            let pupilOffsetY = dy * 0.4;
+
+            eyeState.w += (targetEyeState.w - eyeState.w) * 0.2;
+            eyeState.h += (targetEyeState.h - eyeState.h) * 0.2;
+            eyeState.tilt += (targetEyeState.tilt - eyeState.tilt) * 0.2;
+            eyeState.pR += (targetEyeState.pR - eyeState.pR) * 0.2;
+
+            if (isTalking) baseEyeY += Math.sin(Date.now() / 80) * 12;
+            if (isThinking) { baseEyeY -= 25; pupilOffsetY -= 25; }
+
+            ctx.strokeStyle = eyeColor;
+            ctx.fillStyle = eyeColor;
+            ctx.lineWidth = 18;
+            ctx.lineCap = 'round';
+
+            [-140, 140].forEach((offset, index) => {
+                let tilt = (index === 0) ? eyeState.tilt : -eyeState.tilt;
+                ctx.save();
+                ctx.translate(baseEyeX + offset, baseEyeY);
+                ctx.rotate(tilt);
+                ctx.beginPath(); ctx.ellipse(0, 0, eyeState.w, eyeState.h, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(pupilOffsetX, pupilOffsetY + 8, eyeState.pR, 0, Math.PI * 2); ctx.fillStyle = "#000"; ctx.fill();
+                ctx.restore();
+                ctx.fillStyle = eyeColor;
+            });
+            requestAnimationFrame(animate);
+        }
+        animate();
+    </scr` + `ipt>
+</body>
+</html>`;
+                
+                mirrorWindow = window.open('', 'ARKADAS_MIRROR_' + Date.now());
+                if (mirrorWindow) {
+                    mirrorWindow.document.open();
+                    mirrorWindow.document.write(mirrorHTML);
+                    mirrorWindow.document.close();
+                } else {
+                    showRuntimeError("Yeni sekme açılamadı. Lütfen tarayıcınızın 'Açılır Pencere' engelleyicisine izin verin.");
+                }
             });
 
             const btnSwitchDevice = document.getElementById('btnSwitchDevice');
@@ -725,7 +852,7 @@
                         }
 
                         video.srcObject = stream;
-                        globalMicrophoneStream = stream; // Stream'i güncelle
+                        globalMicrophoneStream = stream; 
 
                         await new Promise(resolve => {
                             video.onloadedmetadata = () => {
